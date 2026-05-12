@@ -27,6 +27,17 @@ def _rows_to_json(rows: Sequence[BaseModel]) -> list[dict[str, Any]]:
     return [_serialize(r.model_dump()) for r in rows]
 
 
+def _dedupe_by_keys(
+    rows: Sequence[BaseModel], merge_keys: Sequence[str]
+) -> list[BaseModel]:
+    """Keep the last occurrence per merge-key tuple. BQ MERGE requires unique keys in staging."""
+    seen: dict[tuple, BaseModel] = {}
+    for r in rows:
+        key = tuple(getattr(r, k) for k in merge_keys)
+        seen[key] = r
+    return list(seen.values())
+
+
 class BigQueryClient:
     """Thin wrapper that MERGEs pydantic rows into a target table via staging."""
 
@@ -66,6 +77,7 @@ class BigQueryClient:
         """
         if not rows:
             return 0
+        rows = _dedupe_by_keys(rows, merge_keys)
         staging_name = f"_staging_{table}_{uuid.uuid4().hex[:8]}"
         staging_ref = f"{self.project}.{self.dataset}.{staging_name}"
         target_ref = f"{self.project}.{self.dataset}.{table}"
@@ -120,6 +132,12 @@ class BigQueryClient:
         """
         if not rows:
             return 0
+        # Dedupe by merge_keys (last-write-wins) so the UPDATE never sees ambiguous matches.
+        seen: dict[tuple, dict[str, Any]] = {}
+        for r in rows:
+            key = tuple(r.get(k) for k in merge_keys)
+            seen[key] = r
+        rows = list(seen.values())
         staging_name = f"_staging_{table}_{uuid.uuid4().hex[:8]}"
         staging_ref = f"{self.project}.{self.dataset}.{staging_name}"
         target_ref = f"{self.project}.{self.dataset}.{table}"
