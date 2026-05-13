@@ -12,9 +12,11 @@ manually clearing the column.
 from __future__ import annotations
 
 import os
+import random
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -92,11 +94,17 @@ def run_transcripts(
 # --- target selection ----------------------------------------------------------------
 
 def _select_targets(bq: BigQueryClient, cap: int) -> list[str]:
+    # `trailers` is polymorphic — a youtube_video_id can have a movie row AND a
+    # tv-season row. GROUP BY collapses those so we don't transcribe twice.
     sql = f"""
     SELECT youtube_video_id
-    FROM `{bq.project}.{bq.dataset}.trailers`
-    WHERE transcript_captured_at IS NULL
-      AND tracking_status = 'active'
+    FROM (
+      SELECT youtube_video_id, MAX(first_seen_at) AS first_seen_at
+      FROM `{bq.project}.{bq.dataset}.trailers`
+      WHERE transcript_captured_at IS NULL
+        AND tracking_status = 'active'
+      GROUP BY youtube_video_id
+    )
     ORDER BY first_seen_at DESC
     LIMIT @cap
     """
@@ -106,8 +114,15 @@ def _select_targets(bq: BigQueryClient, cap: int) -> list[str]:
 
 # --- yta -----------------------------------------------------------------------------
 
+_YTA_JITTER_SECONDS = (0.5, 1.5)
+
+
 def _try_yta(video_id: str) -> tuple[str | None, str | None, str | None]:
     """Returns (text, track_kind, error). text=None on failure."""
+    # Jittered delay before every yta call. YouTube publishes no rate limit; this
+    # spaces out bursts so a sequence of yta-success videos doesn't trip bot
+    # detection. Adds ~4-12 min to a 500-video run.
+    time.sleep(random.uniform(*_YTA_JITTER_SECONDS))
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         from youtube_transcript_api._errors import (
