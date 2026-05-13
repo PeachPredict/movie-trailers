@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Audio
+*.m4a
+
+# Models
+models*/
+
+# Mac
+.DS_Store
+
+# HuggingFace
+CACHEDIR.TAG

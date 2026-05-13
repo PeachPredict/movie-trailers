@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS `${DATASET}.trailers` (
   tracking_status STRING NOT NULL,          -- 'active' | 'ended' | 'unavailable'
   comments_disabled BOOL NOT NULL,          -- pipeline always inserts explicit value
   comments_at_discovery_captured_at TIMESTAMP,
-  comments_pre_release_captured_at TIMESTAMP
+  comments_pre_release_captured_at TIMESTAMP,
+  transcript_captured_at TIMESTAMP          -- guard: stamped success or permanent failure; never re-runs
 )
 OPTIONS (description = "Polymorphic trailer registry. MERGE key: youtube_video_id. Exactly one of {movie_tmdb_id} or {tv_tmdb_id, tv_season_number} is set.");
 
@@ -142,6 +143,19 @@ CREATE TABLE IF NOT EXISTS `${DATASET}.box_office` (
 )
 OPTIONS (description = "Post-theatrical-run box-office snapshot. MERGE key: tmdb_id. V1 covers worldwide totals only.");
 
+CREATE TABLE IF NOT EXISTS `${DATASET}.trailer_transcripts` (
+  youtube_video_id STRING NOT NULL,
+  source STRING NOT NULL,                   -- 'yta' | 'whisper'
+  track_kind STRING,                        -- 'manual' | 'auto-generated' when source='yta'; NULL for whisper
+  language STRING,                          -- BCP-47 / ISO 639-1
+  text STRING,
+  word_count INT64,
+  char_count INT64,
+  error STRING,                             -- non-NULL when both methods failed; text will be NULL
+  captured_at TIMESTAMP NOT NULL
+)
+OPTIONS (description = "Per-trailer transcript, captured once at discovery. MERGE key: youtube_video_id. yta primary, faster-whisper medium fallback.");
+
 CREATE TABLE IF NOT EXISTS `${DATASET}.watch_providers` (
   tmdb_id INT64 NOT NULL,
   content_kind STRING NOT NULL,             -- 'movie' | 'tv'
@@ -173,7 +187,7 @@ OPTIONS (description = "Top cast + key crew per title. MERGE key: (tmdb_id, cont
 
 CREATE TABLE IF NOT EXISTS `${DATASET}.daily_run_log` (
   run_id STRING NOT NULL,
-  phase STRING NOT NULL,                    -- 'discover_movies' | 'discover_tv' | 'stats' | 'comments' | 'box_office'
+  phase STRING NOT NULL,                    -- 'discover_movies' | 'discover_tv' | 'stats' | 'comments' | 'transcripts' | 'box_office'
   started_at TIMESTAMP NOT NULL,
   finished_at TIMESTAMP,
   trailers_processed INT64,

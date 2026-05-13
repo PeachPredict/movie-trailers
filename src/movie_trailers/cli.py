@@ -19,6 +19,7 @@ from movie_trailers.pipeline.comments import run_comments
 from movie_trailers.pipeline.discover_movies import run_discover_movies
 from movie_trailers.pipeline.discover_tv import run_discover_tv
 from movie_trailers.pipeline.stats import run_stats
+from movie_trailers.pipeline.transcripts import run_transcripts
 
 app = typer.Typer(add_completion=False, help="Movie/TV trailer metadata collector.")
 
@@ -58,6 +59,10 @@ def run_daily(
     skip_tv: bool = typer.Option(False, help="Skip discover_tv."),
     skip_stats: bool = typer.Option(False, help="Skip stats."),
     skip_comments: bool = typer.Option(False, help="Skip comments."),
+    skip_transcripts: bool = typer.Option(False, help="Skip transcripts."),
+    transcripts_limit: int | None = typer.Option(
+        None, help="Override TRANSCRIPTS_MAX_PER_RUN for this run."
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run the full daily pipeline: discover (movies + tv) → stats → comments."""
@@ -113,6 +118,16 @@ def run_daily(
                     youtube.quota_units_used - quota_before_comments
                 )
                 ctx["notes"] = f"at_discovery={at_disco} pre_release={pre_rel}"
+
+        if not skip_transcripts:
+            with _phase(run_id, "transcripts", log_rows) as ctx:
+                yta_ok, whisper_ok, failures = run_transcripts(
+                    bq=bq, settings=settings, limit=transcripts_limit
+                )
+                ctx["trailers_processed"] = yta_ok + whisper_ok + failures
+                ctx["notes"] = (
+                    f"yta_ok={yta_ok} whisper_ok={whisper_ok} failures={failures}"
+                )
     finally:
         _persist_run_log(bq, log_rows)
         tmdb.close()

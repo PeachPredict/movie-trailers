@@ -10,8 +10,9 @@ VideoType = Literal["Teaser", "Trailer", "Official Trailer"]
 TrackingStatus = Literal["active", "ended", "unavailable"]
 SnapshotKind = Literal["at_discovery", "pre_release"]
 RunPhase = Literal[
-    "discover_movies", "discover_tv", "stats", "comments", "box_office"
+    "discover_movies", "discover_tv", "stats", "comments", "transcripts", "box_office"
 ]
+TranscriptSource = Literal["yta", "whisper", "failed"]
 
 
 class Genre(BaseModel):
@@ -113,6 +114,7 @@ class TrailerRow(BaseModel):
     comments_disabled: bool = False
     comments_at_discovery_captured_at: datetime | None = None
     comments_pre_release_captured_at: datetime | None = None
+    transcript_captured_at: datetime | None = None
 
 
 class TrailerStatsDailyRow(BaseModel):
@@ -139,6 +141,18 @@ class TrailerCommentSnapshotRow(BaseModel):
     updated_at: datetime | None = None
     rank: int
     collected_at: datetime
+
+
+class TrailerTranscriptRow(BaseModel):
+    youtube_video_id: str
+    source: TranscriptSource  # 'yta' | 'whisper' | 'failed'
+    track_kind: str | None = None
+    language: str | None = None
+    text: str | None = None
+    word_count: int | None = None
+    char_count: int | None = None
+    error: str | None = None
+    captured_at: datetime
 
 
 class WatchProviderRow(BaseModel):

@@ -276,7 +276,7 @@ def _upsert_trailers(bq: BigQueryClient, rows: list[TrailerRow]) -> None:
         "video_type", "name", "published_at", "channel_id", "channel_title", "official",
         "tracking_end_date", "thumbnail_url", "first_seen_at", "last_collected_at",
         "tracking_status", "comments_disabled", "comments_at_discovery_captured_at",
-        "comments_pre_release_captured_at",
+        "comments_pre_release_captured_at", "transcript_captured_at",
     ]
     discovery_update_fields = [
         "video_type", "name", "published_at", "official",

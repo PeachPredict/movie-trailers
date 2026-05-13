@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     tracking_grace_days: int = Field(7, alias="TRACKING_GRACE_DAYS")
     box_office_min_age_days: int = Field(180, alias="BOX_OFFICE_MIN_AGE_DAYS")
     max_active_trailers: int = Field(9300, alias="MAX_ACTIVE_TRAILERS")
+    transcripts_max_per_run: int = Field(100, alias="TRANSCRIPTS_MAX_PER_RUN")
+    whisper_model_name: str = Field("medium", alias="WHISPER_MODEL_NAME")
 
     tmdb_regions: list[str] = Field(
         default_factory=lambda: ["US", "GB", "FR", "DE", "IT", "ES", "JP", "KR", "IN", "BR", "MX"],

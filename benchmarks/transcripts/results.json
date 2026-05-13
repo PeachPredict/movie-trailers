@@ -1,0 +1,165 @@
+[
+  {
+    "youtube_video_id": "bF2yS7EPD-o",
+    "movie_title": "Scary Movie",
+    "duration_seconds": 31,
+    "view_count": 2033187,
+    "yta": {
+      "success": false,
+      "error": "TranscriptsDisabled",
+      "latency_seconds": 1.0749005828984082,
+      "char_count": 0,
+      "word_count": 0,
+      "sample": "",
+      "transcript_path": null,
+      "extra": {}
+    },
+    "whisper": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 1.986648750025779,
+      "char_count": 382,
+      "word_count": 75,
+      "sample": "No other movie, as balls this big. What the fuck? If you think they won't say this. This isn't that Gwyneth Paltrow crap that makes you smell like a badge, is it? If you think they won't show it, fini",
+      "transcript_path": "out/bF2yS7EPD-o.whisper.txt",
+      "extra": {
+        "audio_bytes": 1129043,
+        "detected_language": "en",
+        "language_probability": 1
+      }
+    },
+    "similarity_jaccard": null
+  },
+  {
+    "youtube_video_id": "06qdUs-JdV4",
+    "movie_title": "Plants",
+    "duration_seconds": 66,
+    "view_count": 103,
+    "yta": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 1.0489204169716686,
+      "char_count": 45,
+      "word_count": 10,
+      "sample": "Oh, I'm all right. Heat. Heat. Heat. I for mo",
+      "transcript_path": "out/06qdUs-JdV4.yta.txt",
+      "extra": {
+        "track_kind": "auto-generated"
+      }
+    },
+    "whisper": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 0.32566566695459187,
+      "char_count": 0,
+      "word_count": 0,
+      "sample": "",
+      "transcript_path": "out/06qdUs-JdV4.whisper.txt",
+      "extra": {
+        "audio_bytes": 2272096,
+        "detected_language": "en",
+        "language_probability": 1
+      }
+    },
+    "similarity_jaccard": 0.0
+  },
+  {
+    "youtube_video_id": "M0pP7xKvFJ0",
+    "movie_title": "500 Miles",
+    "duration_seconds": 110,
+    "view_count": 654592,
+    "yta": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 0.9783374578692019,
+      "char_count": 1190,
+      "word_count": 216,
+      "sample": "We used to bring them down here. Do you remember? John! Jesus, you'll give me a bloody heart attack. >> You'll give me one standing there. Grandad. I told you to stop calling. We're at me mum's [music",
+      "transcript_path": "out/M0pP7xKvFJ0.yta.txt",
+      "extra": {
+        "track_kind": "auto-generated"
+      }
+    },
+    "whisper": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 3.615547874942422,
+      "char_count": 1067,
+      "word_count": 211,
+      "sample": "We used to bring them down here. Do you remember? John! Jesus! You'll give me a bloody heart attack. Well, you'll give me one! It's dead in there! I told you to stop, Conan. Move me, Mum's, until we s",
+      "transcript_path": "out/M0pP7xKvFJ0.whisper.txt",
+      "extra": {
+        "audio_bytes": 4131138,
+        "detected_language": "en",
+        "language_probability": 1
+      }
+    },
+    "similarity_jaccard": 0.606
+  },
+  {
+    "youtube_video_id": "tlSDDuWxO_0",
+    "movie_title": "The Death of Robin Hood",
+    "duration_seconds": 147,
+    "view_count": 9085091,
+    "yta": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 1.0892026249784976,
+      "char_count": 618,
+      "word_count": 124,
+      "sample": "Would you like to know a secret? People speak of Robin Hood. Tell his stories. They're all lies. He was not a hero. He were a murderous brigand. We were monsters. I am the outlaw. No! Robin hood. I ow",
+      "transcript_path": "out/tlSDDuWxO_0.yta.txt",
+      "extra": {
+        "track_kind": "manual"
+      }
+    },
+    "whisper": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 1.6472850840073079,
+      "char_count": 411,
+      "word_count": 88,
+      "sample": "Would you like to know a secret full speaker? He was not a hero. You were a murderous briggand I will you in apology You begged for me to let you die What's your name? Can you make for me? Want me to ",
+      "transcript_path": "out/tlSDDuWxO_0.whisper.txt",
+      "extra": {
+        "audio_bytes": 5329386,
+        "detected_language": "en",
+        "language_probability": 1
+      }
+    },
+    "similarity_jaccard": 0.485
+  },
+  {
+    "youtube_video_id": "_gQwG9Xi13g",
+    "movie_title": "Pressure",
+    "duration_seconds": 150,
+    "view_count": 20448,
+    "yta": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 0.9362744160462171,
+      "char_count": 1638,
+      "word_count": 296,
+      "sample": "The weather can destroy us. I'm very proud they chose you, Jim. Dr. James Stagg, reporting for duty. General Eisenhower will see you now. D-Day will be the largest seaborn invasion in history. Churchi",
+      "transcript_path": "out/_gQwG9Xi13g.yta.txt",
+      "extra": {
+        "track_kind": "auto-generated"
+      }
+    },
+    "whisper": {
+      "success": true,
+      "error": null,
+      "latency_seconds": 5.594026874983683,
+      "char_count": 1628,
+      "word_count": 295,
+      "sample": "The weather can destroy us. I'm very proud they chose you, Jim. Dr. James Stagg reporting for duty. General Eisenhower will see you now. D-Day will be the largest Seaborn invasion in history. Churchil",
+      "transcript_path": "out/_gQwG9Xi13g.whisper.txt",
+      "extra": {
+        "audio_bytes": 6184311,
+        "detected_language": "en",
+        "language_probability": 1
+      }
+    },
+    "similarity_jaccard": 0.899
+  }
+]
