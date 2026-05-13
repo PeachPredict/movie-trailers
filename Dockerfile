@@ -22,10 +22,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Bake the Whisper small model into the image so cold starts skip the
-# Hugging Face download. The model lives under HF_HOME so faster-whisper finds it
-# on first use without hitting the network.
-RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', download_root='${WHISPER_MODEL_DIR}')"
+# Bake a Whisper model into the image so cold starts skip the Hugging Face
+# download. Override with `--build-arg WHISPER_BAKE_MODEL=medium` (peach_server
+# uses medium; Cloud Run uses small to fit the 4 GiB limit).
+ARG WHISPER_BAKE_MODEL=small
+ENV WHISPER_BAKE_MODEL=${WHISPER_BAKE_MODEL}
+RUN /app/.venv/bin/python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_BAKE_MODEL'], download_root='${WHISPER_MODEL_DIR}')"
 
 # Install project.
 COPY src ./src

@@ -1,0 +1,21 @@
+services:
+  transcripts:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        WHISPER_BAKE_MODEL: medium
+    image: mt-transcripts:latest
+    env_file:
+      - .env
+    volumes:
+      # Snap docker hides dot-files in $HOME, so we mount a non-hidden copy of
+      # the ADC (see README for the one-time copy step).
+      - ./gcloud:/root/.config/gcloud:ro
+    command:
+      - run-daily
+      - --skip-movies
+      - --skip-tv
+      - --skip-stats
+      - --skip-comments
+    restart: "no"

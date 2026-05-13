@@ -1,0 +1,5 @@
+.env
+sa.json
+gcloud/
+*.json
+!.env.example
