@@ -3,7 +3,7 @@
 Strategy:
 1. Try `youtube-transcript-api` (scrapes YT's timedtext endpoint). Free, ~1s/trailer.
 2. On failure: download audio with yt-dlp to a tempfile, transcribe with faster-whisper
-   `medium`, delete the audio. No persistent cache.
+   `small`, delete the audio. No persistent cache.
 
 Captured exactly once per trailer (guarded by `trailers.transcript_captured_at`).
 A permanent failure also stamps the guard so we don't retry forever — re-fetch by

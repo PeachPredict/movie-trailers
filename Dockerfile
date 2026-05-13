@@ -22,10 +22,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Bake the Whisper medium model into the image so cold starts skip the ~1.5 GB
+# Bake the Whisper small model into the image so cold starts skip the
 # Hugging Face download. The model lives under HF_HOME so faster-whisper finds it
 # on first use without hitting the network.
-RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('medium', download_root='${WHISPER_MODEL_DIR}')"
+RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', download_root='${WHISPER_MODEL_DIR}')"
 
 # Install project.
 COPY src ./src

@@ -31,7 +31,7 @@ RESULTS_MD = HERE / "results.md"
 
 # Whisper model. base = fast, ~150MB, good baseline; bump to 'medium' or
 # 'large-v3' for higher accuracy at higher cost.
-WHISPER_MODEL = "base"
+WHISPER_MODEL = "small"
 WHISPER_DEVICE = "auto"  # 'cpu', 'cuda', or 'auto' — faster-whisper picks Metal on Apple Silicon
 
 

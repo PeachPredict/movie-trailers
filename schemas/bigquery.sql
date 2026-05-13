@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS `${DATASET}.trailer_transcripts` (
   error STRING,                             -- non-NULL when both methods failed; text will be NULL
   captured_at TIMESTAMP NOT NULL
 )
-OPTIONS (description = "Per-trailer transcript, captured once at discovery. MERGE key: youtube_video_id. yta primary, faster-whisper medium fallback.");
+OPTIONS (description = "Per-trailer transcript, captured once at discovery. MERGE key: youtube_video_id. yta primary, faster-whisper small fallback.");
 
 CREATE TABLE IF NOT EXISTS `${DATASET}.watch_providers` (
   tmdb_id INT64 NOT NULL,
