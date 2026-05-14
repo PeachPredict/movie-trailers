@@ -46,17 +46,33 @@ docker compose run --rm transcripts run-daily \
 
 ## Scheduling
 
-Add to peach_server's crontab to run nightly at 03:00 local time:
+Run nightly at **16:30 UTC**, ~30 min after the Cloud Run pipeline (which kicks
+off at 14:00 UTC and typically wraps within two hours). That ordering matters:
+the transcripts phase reads `trailers` rows the discover phase produced earlier
+in the same day.
+
+Snap-installed Docker isn't on cron's `PATH`, so the full binary path is
+required. Pin the schedule to UTC explicitly — server local time would silently
+drift relative to the Cloud Run schedule.
 
 ```cron
-0 3 * * * cd /path/to/movie-trailers/peach_server && docker compose run --rm transcripts >> /var/log/mt-transcripts.log 2>&1
+CRON_TZ=UTC
+30 16 * * * cd /path/to/movie-trailers/peach_server && /snap/bin/docker compose run --rm transcripts >> $HOME/mt-transcripts.log 2>&1
+```
+
+Install non-destructively (preserves any existing entries):
+
+```sh
+(crontab -l 2>/dev/null; printf 'CRON_TZ=UTC\n30 16 * * * cd %s/peach_server && /snap/bin/docker compose run --rm transcripts >> $HOME/mt-transcripts.log 2>&1\n' "$(cd .. && pwd)") | crontab -
+crontab -l
 ```
 
 ## Notes
 
-- `WHISPER_MODEL_NAME` is locked to `small` in `.env.example` — that's what the
-  baked-in model layer of the image contains. Changing this triggers a
-  HuggingFace download on first run.
+- `WHISPER_MODEL_NAME` defaults to `medium` in `.env.example`, matching the
+  `WHISPER_BAKE_MODEL` build arg in [compose.yaml](compose.yaml) so the model
+  is already on disk inside the image. Changing either side without changing
+  the other triggers a HuggingFace download on first run.
 - `TMDB_API_KEY` / `YOUTUBE_API_KEY` are required by `Settings` but unused in
   this path; dummy values are fine.
 - Transcripts already attempted (rows with `transcript_captured_at IS NOT NULL`)

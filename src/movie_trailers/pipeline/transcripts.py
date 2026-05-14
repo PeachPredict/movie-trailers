@@ -68,16 +68,16 @@ def run_transcripts(
             continue
 
         model = _load_whisper(whisper_holder, settings.whisper_model_name)
-        text, lang, w_err = _try_whisper(vid, model)
+        text, lang, kind, w_err = _try_whisper(vid, model)
         if text:
-            rows.append(_row(vid, source="whisper", track_kind=None, language=lang,
+            rows.append(_row(vid, source="whisper", track_kind=kind, language=lang,
                              text=text, captured_at=now))
             whisper_ok += 1
         else:
             rows.append(_row(
                 vid, source="failed", track_kind=None, language=None,
                 text=None, captured_at=now,
-                error=f"yta={yta_err}; whisper={w_err}",
+                error=f"yta={_short_err(yta_err)}; whisper={_short_err(w_err)}",
             ))
             failures += 1
         stamps.append({"youtube_video_id": vid, "captured_at": now})
@@ -110,6 +110,21 @@ def _select_targets(bq: BigQueryClient, cap: int) -> list[str]:
     """
     rows = bq.query(sql, {"cap": cap})
     return [r["youtube_video_id"] for r in rows]
+
+
+# --- error formatting ---------------------------------------------------------------
+
+def _short_err(err: str | None) -> str:
+    """Collapse a verbose yta/whisper error string to its leading tag.
+
+    yta's `IpBlocked` / `VideoUnplayable` exceptions stringify to ~1.5 KB of boilerplate.
+    Strings already produced as short tags (e.g. ``"TranscriptsDisabled"``,
+    ``"yt-dlp_exit_1"``) pass through unchanged.
+    """
+    if not err:
+        return str(err)
+    head, _, _ = err.partition(":")
+    return head.strip() or err
 
 
 # --- yta -----------------------------------------------------------------------------
@@ -174,10 +189,18 @@ def _load_whisper(holder: dict[str, Any], model_name: str):
     return holder["model"]
 
 
-def _try_whisper(video_id: str, model) -> tuple[str | None, str | None, str | None]:
-    """Download audio to tempdir, transcribe, delete. Returns (text, language, error)."""
+def _try_whisper(
+    video_id: str, model
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Download audio to tempdir, transcribe, delete.
+
+    Returns (text, language, track_kind, error). `track_kind` is "speech" when the
+    VAD-filtered pass returned text, or "music" when only the VAD-off pass did —
+    the latter rescues song-driven trailers (Bollywood, Tamil/Telugu, K-pop teasers)
+    where VAD discards singing as non-speech.
+    """
     if shutil.which("yt-dlp") is None:
-        return None, None, "yt-dlp_not_installed"
+        return None, None, None, "yt-dlp_not_installed"
 
     with tempfile.TemporaryDirectory(prefix="mt-whisper-") as tmp:
         tmpdir = Path(tmp)
@@ -195,25 +218,29 @@ def _try_whisper(video_id: str, model) -> tuple[str | None, str | None, str | No
                 timeout=120,
             )
         except subprocess.TimeoutExpired:
-            return None, None, "yt-dlp_timeout"
+            return None, None, None, "yt-dlp_timeout"
         except subprocess.CalledProcessError as exc:
-            return None, None, f"yt-dlp_exit_{exc.returncode}"
+            return None, None, None, f"yt-dlp_exit_{exc.returncode}"
         except Exception as exc:  # noqa: BLE001
-            return None, None, f"yt-dlp_{type(exc).__name__}"
+            return None, None, None, f"yt-dlp_{type(exc).__name__}"
 
         audio_files = list(tmpdir.iterdir())
         if not audio_files:
-            return None, None, "yt-dlp_no_output"
+            return None, None, None, "yt-dlp_no_output"
         audio_path = audio_files[0]
 
         try:
             segments, info = model.transcribe(str(audio_path), vad_filter=True)
             text = " ".join(seg.text.strip() for seg in segments).strip()
-            if not text:
-                return None, None, "whisper_empty"
-            return text, info.language, None
+            if text:
+                return text, info.language, "speech", None
+            segments, info = model.transcribe(str(audio_path), vad_filter=False)
+            text = " ".join(seg.text.strip() for seg in segments).strip()
+            if text:
+                return text, info.language, "music", None
+            return None, None, None, "whisper_empty"
         except Exception as exc:  # noqa: BLE001
-            return None, None, f"whisper_{type(exc).__name__}: {exc}"
+            return None, None, None, f"whisper_{type(exc).__name__}: {exc}"
 
 
 # --- writers -------------------------------------------------------------------------
