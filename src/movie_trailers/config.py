@@ -24,6 +24,24 @@ class Settings(BaseSettings):
         alias="TMDB_REGIONS",
     )
 
+    # --- Digest email (optional; only required when running `mt send-digest`) ---
+    smtp_host: str | None = Field(None, alias="SMTP_HOST")
+    smtp_port: int = Field(587, alias="SMTP_PORT")
+    # SMTP_SENDER is the From address; also reused as the SMTP login username
+    # unless SMTP_USERNAME is set explicitly. Yahoo, Gmail, etc. all expect
+    # username == full email when authenticating with an app password.
+    smtp_sender: str | None = Field(None, alias="SMTP_SENDER")
+    smtp_username: str | None = Field(None, alias="SMTP_USERNAME")
+    smtp_password: str | None = Field(None, alias="SMTP_PASSWORD")
+    # SMTP_SSL=true → implicit TLS (SMTPS, usually port 465).
+    # SMTP_SSL=false (default) → STARTTLS upgrade on port 587.
+    smtp_ssl: bool = Field(False, alias="SMTP_SSL")
+    digest_email_to: str | None = Field(None, alias="DIGEST_EMAIL_TO")
+    digest_top_tracked: int = Field(50, alias="DIGEST_TOP_TRACKED")
+    tmdb_image_base: str = Field(
+        "https://image.tmdb.org/t/p/w154", alias="TMDB_IMAGE_BASE"
+    )
+
 
 def load_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]

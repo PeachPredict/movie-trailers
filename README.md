@@ -20,6 +20,11 @@ Required env vars (see `src/movie_trailers/config.py`):
 | `GCP_PROJECT` | GCP project hosting BigQuery |
 | `BQ_DATASET` | Defaults to `movie_trailers` |
 | `BQ_LOCATION` | Defaults to `us-central1` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SENDER` / `SMTP_PASSWORD` | Required only for `mt send-digest`. Port defaults to 587 (STARTTLS). `SMTP_SENDER` is both the From address and the SMTP login (e.g. Yahoo: `smtp.mail.yahoo.com:587`, app password). Override the login with `SMTP_USERNAME` if it differs. |
+| `SMTP_SSL` | Set to `true` to use implicit TLS (SMTPS, port 465). Defaults to `false` (STARTTLS). |
+| `DIGEST_EMAIL_TO` | Comma-separated recipients for the digest. Override per-call with `--to`. |
+| `DIGEST_TOP_TRACKED` | Cap for the "currently tracked" section (top-N by Δviews). Defaults to 50. |
+| `TMDB_IMAGE_BASE` | TMDB CDN prefix for poster `<img>` URLs. Defaults to `https://image.tmdb.org/t/p/w154`. |
 
 ## Provision BigQuery
 
@@ -38,6 +43,37 @@ uv run mt run-daily --verbose
 uv run mt run-daily --dataset=movie_trailers_dev --limit=20 --verbose
 # Single phase only:
 uv run mt run-daily --skip-movies --skip-tv --skip-comments --limit=20
+```
+
+## Weekly / monthly digest email
+
+```sh
+# Preview the HTML without sending (writes to stdout or --out file).
+uv run mt send-digest --period=week --dry-run --out /tmp/digest.html
+
+# Send for real (needs SMTP_* + DIGEST_EMAIL_* env vars).
+uv run mt send-digest --period=week
+uv run mt send-digest --period=month         # later, when the monthly cadence kicks in
+```
+
+The digest contains three sections:
+1. **New trailers added** in the window (Title, link, latest views/likes, poster).
+2. **Currently tracked — top N by Δviews** (default 50; configurable via `DIGEST_TOP_TRACKED` or `--top-tracked`).
+3. **Database statistics by country** (per-origin-country counts of trailers, transcripts, comments, status breakdown).
+
+For Cloud Run, deploy a second job and a weekly Scheduler entry alongside the daily one:
+
+```sh
+gcloud run jobs deploy mt-digest \
+  --image "us-central1-docker.pkg.dev/${GCP_PROJECT}/mt/mt:latest" \
+  --region us-central1 \
+  --command mt --args "send-digest,--period=week" \
+  --set-env-vars "GCP_PROJECT=${GCP_PROJECT},BQ_DATASET=movie_trailers,SMTP_HOST=...,SMTP_PORT=587,SMTP_USERNAME=...,SMTP_PASSWORD=...,DIGEST_EMAIL_FROM=...,DIGEST_EMAIL_TO=..."
+gcloud scheduler jobs create http mt-digest-weekly \
+  --location us-central1 \
+  --schedule "0 15 * * 1"  `# Mondays 15:00 UTC, after Monday's daily run` \
+  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${GCP_PROJECT}/jobs/mt-digest:run" \
+  --oauth-service-account-email "${SCHEDULER_SA}"
 ```
 
 ## Tests + lint

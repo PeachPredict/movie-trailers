@@ -4,7 +4,8 @@ import logging
 import sys
 import uuid
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 
 import structlog
 import typer
@@ -14,6 +15,14 @@ from movie_trailers.clients.bigquery import BigQueryClient
 from movie_trailers.clients.tmdb import TMDBClient
 from movie_trailers.clients.youtube import YouTubeClient
 from movie_trailers.config import load_settings
+from movie_trailers.digest.mailer import send_email
+from movie_trailers.digest.queries import (
+    cutoff_for_period,
+    fetch_country_stats,
+    fetch_new_trailers,
+    fetch_top_tracked_trailers,
+)
+from movie_trailers.digest.render import render_digest_html
 from movie_trailers.models import DailyRunLogRow
 from movie_trailers.pipeline.comments import run_comments
 from movie_trailers.pipeline.discover_movies import run_discover_movies
@@ -185,6 +194,99 @@ def _persist_run_log(bq: BigQueryClient, rows: list[DailyRunLogRow]) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         log.error("run_log.persist_failed", error=str(exc))
+
+
+@app.command("send-digest")
+def send_digest(
+    period: str = typer.Option("week", help="Digest window: 'week' or 'month'."),
+    dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
+    top_tracked: int | None = typer.Option(
+        None, help="Override DIGEST_TOP_TRACKED — top-N tracked trailers by Δviews."
+    ),
+    to: str | None = typer.Option(
+        None,
+        "--to",
+        help="Comma-separated recipients. Overrides DIGEST_EMAIL_TO.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Render HTML and write to --out (or stdout); do not send email.",
+    ),
+    out: str | None = typer.Option(None, help="When --dry-run: write HTML here instead of stdout."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Build and email the weekly/monthly trailer digest."""
+    _configure_logging(verbose)
+    settings = load_settings()
+    if dataset:
+        settings.bq_dataset = dataset
+    cap = top_tracked if top_tracked is not None else settings.digest_top_tracked
+
+    today = date.today()
+    cutoff = cutoff_for_period(period, today=today)
+
+    bq = BigQueryClient(
+        project=settings.gcp_project,
+        dataset=settings.bq_dataset,
+        location=settings.bq_location,
+    )
+
+    log.info("digest.fetch", period=period, cutoff=cutoff.isoformat(), top_tracked=cap)
+    new_trailers = fetch_new_trailers(bq, cutoff_date=cutoff)
+    top = fetch_top_tracked_trailers(bq, cutoff_date=cutoff, limit=cap)
+    countries = fetch_country_stats(bq)
+    log.info(
+        "digest.fetched",
+        new=len(new_trailers),
+        tracked=len(top),
+        countries=len(countries),
+    )
+
+    html = render_digest_html(
+        period=period,
+        cutoff_date=cutoff,
+        today=today,
+        new_trailers=new_trailers,
+        top_tracked=top,
+        country_stats=countries,
+        image_base=settings.tmdb_image_base,
+        top_tracked_cap=cap,
+    )
+
+    if dry_run:
+        if out:
+            out_path = Path(out)
+            out_path.write_text(html, encoding="utf-8")
+            log.info("digest.dry_run.wrote", path=str(out_path))
+        else:
+            typer.echo(html)
+        return
+
+    recipients_raw = to or settings.digest_email_to
+    sender = settings.smtp_sender
+    host = settings.smtp_host
+    if not recipients_raw or not sender or not host:
+        raise typer.BadParameter(
+            "send-digest requires SMTP_HOST, SMTP_SENDER, and DIGEST_EMAIL_TO "
+            "(or --to). Use --dry-run to preview without sending."
+        )
+    recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
+    subject = f"Movie-trailers {period}ly digest — {today.isoformat()}"
+
+    log.info("digest.send", host=host, recipients=recipients, subject=subject)
+    send_email(
+        host=host,
+        port=settings.smtp_port,
+        username=settings.smtp_username or sender,
+        password=settings.smtp_password,
+        sender=sender,
+        recipients=recipients,
+        subject=subject,
+        html=html,
+        starttls=not settings.smtp_ssl,
+    )
+    log.info("digest.sent", recipients=recipients)
 
 
 if __name__ == "__main__":

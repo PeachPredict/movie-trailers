@@ -55,12 +55,21 @@ uv run mt run-daily --dataset=movie_trailers_dev --limit=20 --verbose   # dry-is
 
 Single phase: `--skip-movies --skip-tv --skip-stats --skip-comments` flags compose.
 
+Digest email (read-only against BQ):
+
+```sh
+uv run mt send-digest --period=week --dry-run --out /tmp/digest.html   # preview
+uv run mt send-digest --period=week                                    # send
+uv run mt send-digest --period=month                                   # later cadence
+```
+
 ## Code layout
 
 - `src/movie_trailers/clients/` — TMDB, YouTube, BigQuery clients (HTTP retries via tenacity).
 - `src/movie_trailers/pipeline/` — one module per phase; `_common.py` holds shared filters.
+- `src/movie_trailers/digest/` — read-only BQ queries + HTML render + SMTP send for the weekly/monthly digest email (`mt send-digest`). No writes; safe to run anytime.
 - `src/movie_trailers/models.py` — pydantic row types that map 1:1 to BigQuery tables.
-- `src/movie_trailers/cli.py` — `mt run-daily` Typer entrypoint; orchestrates phases and writes `daily_run_log`.
+- `src/movie_trailers/cli.py` — `mt run-daily` and `mt send-digest` Typer entrypoints.
 - `schemas/bigquery.sql` — DDL with `${DATASET}` placeholder.
 
 ## BigQuery write pattern
