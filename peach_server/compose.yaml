@@ -19,3 +19,16 @@ services:
       - --skip-stats
       - --skip-comments
     restart: "no"
+
+  # Weekly digest email. Reuses the same image as `transcripts` (the project is
+  # baked in by `mt`'s entrypoint). Requires SMTP_* + DIGEST_EMAIL_TO in .env.
+  digest:
+    image: mt-transcripts:latest
+    env_file:
+      - .env
+    volumes:
+      - ./gcloud:/root/.config/gcloud:ro
+    command:
+      - send-digest
+      - --period=week
+    restart: "no"
