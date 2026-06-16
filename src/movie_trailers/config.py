@@ -37,10 +37,6 @@ class Settings(BaseSettings):
     # SMTP_SSL=false (default) → STARTTLS upgrade on port 587.
     smtp_ssl: bool = Field(False, alias="SMTP_SSL")
     digest_email_to: str | None = Field(None, alias="DIGEST_EMAIL_TO")
-    digest_top_tracked: int = Field(50, alias="DIGEST_TOP_TRACKED")
-    tmdb_image_base: str = Field(
-        "https://image.tmdb.org/t/p/w154", alias="TMDB_IMAGE_BASE"
-    )
 
 
 def load_settings() -> Settings:

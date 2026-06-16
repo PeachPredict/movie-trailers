@@ -16,12 +16,7 @@ from movie_trailers.clients.tmdb import TMDBClient
 from movie_trailers.clients.youtube import YouTubeClient
 from movie_trailers.config import load_settings
 from movie_trailers.digest.mailer import send_email
-from movie_trailers.digest.queries import (
-    cutoff_for_period,
-    fetch_country_stats,
-    fetch_new_trailers,
-    fetch_top_tracked_trailers,
-)
+from movie_trailers.digest.queries import fetch_country_stats
 from movie_trailers.digest.render import render_digest_html
 from movie_trailers.models import DailyRunLogRow
 from movie_trailers.pipeline.comments import run_comments
@@ -200,9 +195,6 @@ def _persist_run_log(bq: BigQueryClient, rows: list[DailyRunLogRow]) -> None:
 def send_digest(
     period: str = typer.Option("week", help="Digest window: 'week' or 'month'."),
     dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
-    top_tracked: int | None = typer.Option(
-        None, help="Override DIGEST_TOP_TRACKED — top-N tracked trailers by Δviews."
-    ),
     to: str | None = typer.Option(
         None,
         "--to",
@@ -216,15 +208,13 @@ def send_digest(
     out: str | None = typer.Option(None, help="When --dry-run: write HTML here instead of stdout."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    """Build and email the weekly/monthly trailer digest."""
+    """Build and email the weekly/monthly trailer digest (country aggregation)."""
     _configure_logging(verbose)
     settings = load_settings()
     if dataset:
         settings.bq_dataset = dataset
-    cap = top_tracked if top_tracked is not None else settings.digest_top_tracked
 
     today = date.today()
-    cutoff = cutoff_for_period(period, today=today)
 
     bq = BigQueryClient(
         project=settings.gcp_project,
@@ -232,27 +222,11 @@ def send_digest(
         location=settings.bq_location,
     )
 
-    log.info("digest.fetch", period=period, cutoff=cutoff.isoformat(), top_tracked=cap)
-    new_trailers = fetch_new_trailers(bq, cutoff_date=cutoff)
-    top = fetch_top_tracked_trailers(bq, cutoff_date=cutoff, limit=cap)
+    log.info("digest.fetch", period=period)
     countries = fetch_country_stats(bq)
-    log.info(
-        "digest.fetched",
-        new=len(new_trailers),
-        tracked=len(top),
-        countries=len(countries),
-    )
+    log.info("digest.fetched", countries=len(countries))
 
-    html = render_digest_html(
-        period=period,
-        cutoff_date=cutoff,
-        today=today,
-        new_trailers=new_trailers,
-        top_tracked=top,
-        country_stats=countries,
-        image_base=settings.tmdb_image_base,
-        top_tracked_cap=cap,
-    )
+    html = render_digest_html(period=period, today=today, country_stats=countries)
 
     if dry_run:
         if out:

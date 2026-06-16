@@ -56,10 +56,7 @@ uv run mt send-digest --period=week
 uv run mt send-digest --period=month         # later, when the monthly cadence kicks in
 ```
 
-The digest contains three sections:
-1. **New trailers added** in the window (Title, link, latest views/likes, poster).
-2. **Currently tracked — top N by Δviews** (default 50; configurable via `DIGEST_TOP_TRACKED` or `--top-tracked`).
-3. **Database statistics by country** (per-origin-country counts of trailers, transcripts, comments, status breakdown).
+The digest is a single aggregation: **database statistics by country** — per-origin-country counts of trailers, transcripts, comments, and status breakdown (active / ended / unavailable). A trailer with multiple origin countries is counted in each.
 
 For Cloud Run, deploy a second job and a weekly Scheduler entry alongside the daily one:
 
