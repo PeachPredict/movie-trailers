@@ -4,6 +4,14 @@ Daily collector for YouTube trailer metadata of upcoming movies and TV shows wor
 Discovers releases via TMDB, captures daily view/like/comment stats and twice-per-trailer
 top-30 comment snapshots from YouTube, and stores everything in BigQuery.
 
+## Portfolio site
+
+A static showcase (carousel + Data-Engineering / Time-Series / MCP / Model-Distillation
+cards) lives in [`docs/`](docs/) and is served on GitHub Pages at
+**https://peachpredict.github.io/movie-trailers/**. Its data is read-only JSON snapshots
+written by `uv run mt generate-site-data` and refreshed by a scheduled GitHub Action — see
+[`docs/README.md`](docs/README.md).
+
 ## Local setup
 
 ```sh

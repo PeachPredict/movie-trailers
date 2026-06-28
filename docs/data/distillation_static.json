@@ -1,0 +1,22 @@
+{
+  "teacher": {
+    "model": "Claude Opus 4.8",
+    "labels": 910,
+    "method": "order-blinded per-trailer excitement (0–100); the teacher never sees a trailer's ordinal, title, date, or movie — only the comment text"
+  },
+  "student": {
+    "embedder": "all-MiniLM-L6-v2 (ONNX, 384-d sentence embeddings)",
+    "head": "numpy Ridge (L2 linear regression)",
+    "runtime": "onnxruntime + tokenizers + numpy — torch-free, no API call",
+    "artifact": "src/movie_trailers/content/artifacts/ridge.npz",
+    "model_version_prefix": "mlv1-minilm-l6"
+  },
+  "validation": {
+    "cv": "GroupKFold by movie (a movie's trailer #1 can't leak into the fold scoring its #4)",
+    "spearman_rho": 0.65,
+    "declining_share": 0.60,
+    "lexicon_proxy_share": 0.49,
+    "dose_response_pts": { "2": -1.2, "3-4": -3.9, "5+": -10.2 }
+  },
+  "takeaway": "A regex/lexicon proxy is blind to the decay (~49%, a coin flip) because it's semantic — trailer fatigue, sarcasm. The distilled student reproduces the validated finding through the shipped runtime path at ~zero marginal cost."
+}

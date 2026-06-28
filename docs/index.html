@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movie Trailers — a worldwide trailer-analytics pipeline</title>
+  <meta name="description" content="A daily data pipeline that tracks YouTube trailers for upcoming movies and TV worldwide — data engineering, time-series analysis, an MCP server, and a distilled local model.">
+  <link rel="stylesheet" href="./assets/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+  <script src="./assets/app.js" defer></script>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Data engineering · time series · LLM tooling</p>
+    <h1>Movie&nbsp;Trailers</h1>
+    <p class="lede">A daily pipeline that tracks YouTube trailers for upcoming movies &amp; TV
+      <em>worldwide</em> — from TMDB discovery to BigQuery, an MCP server for analysts, and a
+      distilled local model that predicts how audience excitement fades across a film's trailers.</p>
+    <div class="stats" id="coverage-stats" aria-label="dataset coverage"></div>
+    <p class="links">
+      <a class="btn" href="https://github.com/PeachPredict/movie-trailers" target="_blank" rel="noopener">Source on GitHub ↗</a>
+    </p>
+  </div>
+</header>
+
+<section class="band" id="trending-section">
+  <div class="wrap">
+    <h2>What we&rsquo;re tracking right now</h2>
+    <p class="sub">Top movies &amp; shows by view growth over the last 30 days. Click a poster to watch the trailer.</p>
+    <div class="carousel" id="carousel" role="list"></div>
+  </div>
+</section>
+
+<main class="wrap cards">
+
+  <!-- 1. DATA ENGINEERING -->
+  <article class="card">
+    <h3><span class="ico">🛠️</span> Data Engineering &amp; API handling</h3>
+    <p>A containerized <strong>Cloud Run Job</strong> runs every day at 14:00 UTC, moving through six
+      phases — <code>discover_movies → discover_tv → stats → comments → excitement → predictions</code>.
+      Discovery is TMDB-only (zero YouTube quota); stats &amp; comments come from the YouTube Data API;
+      everything lands in BigQuery via idempotent <code>MERGE</code> so re-runs never double-write.</p>
+    <div class="tech">
+      <div><b>TMDB API</b><span>Source of upcoming movies/TV &amp; metadata. Discovery only — spends no YouTube quota.</span></div>
+      <div><b>YouTube Data API v3</b><span>Daily view/like stats + top-30 comments, batched 50 ids/call (~1–2k of 10k units/day).</span></div>
+      <div><b>BigQuery</b><span>Serverless columnar warehouse. Writes go through staged <code>MERGE</code> — idempotent by design.</span></div>
+      <div><b>Cloud Run + Scheduler</b><span>The pipeline is one container, triggered on a cron. No servers to babysit.</span></div>
+    </div>
+    <p class="src"><a href="https://github.com/PeachPredict/movie-trailers/tree/main/src/movie_trailers/pipeline" target="_blank" rel="noopener">View the pipeline source ↗</a></p>
+  </article>
+
+  <!-- 2. TIME SERIES -->
+  <article class="card">
+    <h3><span class="ico">📉</span> Time Series — why studios drop more trailers</h3>
+    <p>A trailer&rsquo;s view velocity decays geometrically — the median trailer&rsquo;s
+      <strong>half-life is ~6 days</strong>. Studios fight that decay by launching fresh trailers:
+      <strong>77%</strong> of launches in the data followed a measurable decline, and a new trailer
+      injects <strong>~2.8×</strong> the view velocity. The chart contrasts two films released around
+      the same time — one that kept launching trailers vs. one that didn&rsquo;t. <span class="star">★</span>
+      marks a new-trailer launch; watch the multi-trailer film re-accelerate at each star while the
+      single-trailer film just fades.</p>
+    <div class="chart-box"><canvas id="views-chart"></canvas></div>
+    <p class="caption" id="views-caption"></p>
+    <div class="statline" id="engagement-stats"></div>
+    <div class="tech">
+      <div><b>Exponential decay / half-life</b><span>Views fade geometrically; we fit ln(new-views) vs day to get a half-life.</span></div>
+      <div><b>Two engagement axes</b><span>Quality (like/view) and demand (velocity) move almost independently (+0.10).</span></div>
+      <div><b>Least-squares fitting</b><span>Per-movie slopes via COVAR/VAR — the trend behind each verdict.</span></div>
+    </div>
+    <p class="src"><a href="https://github.com/PeachPredict/movie-trailers/blob/main/src/movie_trailers/mcp/queries.py" target="_blank" rel="noopener">View the analysis queries ↗</a></p>
+  </article>
+
+  <!-- 3. MCP SERVER -->
+  <article class="card wide">
+    <h3><span class="ico">🔌</span> MCP server — the dataset as LLM tools</h3>
+    <p>A read-only <strong>Model Context Protocol</strong> server exposes the warehouse as 10 tools an
+      LLM (e.g. Claude) can call directly — search, metrics, comments, trending, engagement &amp;
+      excitement decay, predictions. No SQL for the analyst; the model picks the tool. Pick one below to
+      see its real request and response.</p>
+    <div class="explorer" id="mcp-explorer">
+      <ul class="tool-list" id="mcp-tools" role="tablist"></ul>
+      <div class="tool-detail" id="mcp-detail"></div>
+    </div>
+    <div class="tech">
+      <div><b>MCP</b><span>An open standard that lets an LLM call your tools with typed args &amp; structured results.</span></div>
+      <div><b>JSON-RPC over stdio</b><span>The transport: the client spawns the process — no HTTP server, no open port.</span></div>
+      <div><b>Read-only &amp; least-privilege</b><span>Only SELECTs, behind a viewer-scoped service account. It can&rsquo;t mutate the warehouse.</span></div>
+    </div>
+    <p class="src"><a href="https://github.com/PeachPredict/movie-trailers/blob/main/src/movie_trailers/mcp/README.md" target="_blank" rel="noopener">Tool reference ↗</a></p>
+  </article>
+
+  <!-- 4. MODEL DISTILLATION -->
+  <article class="card wide">
+    <h3><span class="ico">🧪</span> Model Distillation — predicting excitement decay</h3>
+    <p>Comment <em>excitement</em> fades as a film keeps dropping trailers — and it&rsquo;s a
+      <strong>semantic</strong> decay (fatigue, sarcasm) a keyword model can&rsquo;t see. We proved it with
+      Claude, then distilled Claude into a tiny local model so it runs daily for ~free.</p>
+    <div class="theory">
+      <h4>The idea, in plain terms</h4>
+      <p>A big <b>teacher</b> (Claude) is accurate but expensive to run on every trailer, so it labels a
+        training set <em>once</em>. A tiny <b>student</b> learns to reproduce those labels and then runs
+        on its own at ~zero cost. It works here because excitement lives in <em>meaning</em>, not keywords:
+        frozen sentence <b>embeddings</b> place &ldquo;this looks incredible&rdquo; and &ldquo;they showed
+        the whole movie again&rdquo; far apart, and a small linear head reads excitement off that geometry.</p>
+    </div>
+    <figure class="schema">
+      <svg viewBox="0 0 760 300" role="img" aria-label="How the distillation works: a Claude teacher labels comments once; a small embedder + Ridge head is trained to reproduce those labels and then runs daily.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#9aa7b4"/>
+          </marker>
+        </defs>
+        <!-- Lane 1: teacher -->
+        <text x="16" y="32" fill="#9aa7b4" font-size="13" font-weight="600">① TEACH ONCE · expensive (Claude)</text>
+        <g class="b acc">
+          <rect x="16" y="48" width="150" height="54" rx="10"/>
+          <text x="91" y="71">YouTube</text><text x="91" y="89">comments</text>
+        </g>
+        <line x1="166" y1="75" x2="204" y2="75" stroke="#9aa7b4" stroke-width="2" marker-end="url(#arrow)"/>
+        <g class="b acc">
+          <rect x="206" y="48" width="190" height="54" rx="10"/>
+          <text x="301" y="71">Claude · teacher</text><text x="301" y="89">scores 0–100, order-blinded</text>
+        </g>
+        <line x1="396" y1="75" x2="434" y2="75" stroke="#9aa7b4" stroke-width="2" marker-end="url(#arrow)"/>
+        <g class="b acc">
+          <rect x="436" y="48" width="150" height="54" rx="10"/>
+          <text x="511" y="71">Excitement</text><text x="511" y="89">labels (0–100)</text>
+        </g>
+        <!-- distill connector -->
+        <line x1="511" y1="102" x2="497" y2="196" stroke="#ff7a59" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+        <text x="525" y="152" fill="#ff7a59" font-size="12" font-weight="600">distill</text>
+        <text x="525" y="168" fill="#9aa7b4" font-size="11">fit the head</text>
+        <!-- Lane 2: student -->
+        <text x="16" y="186" fill="#9aa7b4" font-size="13" font-weight="600">② RUN DAILY · ~$0 (local, no API)</text>
+        <g class="b">
+          <rect x="16" y="202" width="150" height="54" rx="10"/>
+          <text x="91" y="234">New comments</text>
+        </g>
+        <line x1="166" y1="229" x2="204" y2="229" stroke="#9aa7b4" stroke-width="2" marker-end="url(#arrow)"/>
+        <g class="b blu">
+          <rect x="206" y="202" width="190" height="54" rx="10"/>
+          <text x="301" y="225">MiniLM embedder</text><text x="301" y="243">ONNX · frozen</text>
+        </g>
+        <line x1="396" y1="229" x2="434" y2="229" stroke="#9aa7b4" stroke-width="2" marker-end="url(#arrow)"/>
+        <g class="b blu">
+          <rect x="436" y="202" width="120" height="54" rx="10"/>
+          <text x="496" y="234">Ridge head</text>
+        </g>
+        <line x1="556" y1="229" x2="594" y2="229" stroke="#9aa7b4" stroke-width="2" marker-end="url(#arrow)"/>
+        <g class="b grn">
+          <rect x="596" y="202" width="150" height="54" rx="10"/>
+          <text x="671" y="225">Excitement 0–100</text><text x="671" y="243">matches teacher</text>
+        </g>
+      </svg>
+      <figcaption>The expensive teacher labels comments <em>once</em>; the tiny embedder + Ridge
+        <strong>student</strong> learns to reproduce those scores, ships as an 11&nbsp;KB
+        <code>ridge.npz</code>, and then scores every new trailer daily for ~$0.</figcaption>
+    </figure>
+    <div class="statline" id="dose-facts"></div>
+    <div class="tech">
+      <div><b>Sentence embeddings</b><span>Turn a comment into a 384-d vector where meaning ≈ distance.</span></div>
+      <div><b>MiniLM (all-MiniLM-L6-v2)</b><span>A small, fast sentence encoder — the frozen embedder.</span></div>
+      <div><b>Ridge regression</b><span>A 1-line L2 model maps embeddings → a 0–100 excitement score.</span></div>
+      <div><b>ONNX / onnxruntime</b><span>Runs the encoder torch-free, so the daily job stays light.</span></div>
+      <div><b>Order-blinding</b><span>The teacher never sees trailer order — so the student learns excitement, not position.</span></div>
+      <div><b>GroupKFold</b><span>Validation splits by movie, so a film can&rsquo;t leak across train/test.</span></div>
+    </div>
+    <p class="src"><a href="https://github.com/PeachPredict/movie-trailers/blob/main/src/movie_trailers/content/excitement_model.py" target="_blank" rel="noopener">View the model</a> · <a href="https://github.com/PeachPredict/movie-trailers/tree/main/benchmarks/excitement" target="_blank" rel="noopener">distillation pipeline ↗</a></p>
+  </article>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p id="meta-line">Loading…</p>
+    <p><a href="https://github.com/PeachPredict/movie-trailers" target="_blank" rel="noopener">PeachPredict/movie-trailers</a> · built as a data portfolio</p>
+  </div>
+</footer>
+</body>
+</html>

@@ -5,8 +5,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    tmdb_api_key: str = Field(..., alias="TMDB_API_KEY")
-    youtube_api_key: str = Field(..., alias="YOUTUBE_API_KEY")
+    # Ingest keys are required only by the daily pipeline (discover/stats/comments).
+    # Read-only commands (mcp, send-digest, generate-site-data) don't need them, so
+    # they're optional here and the pipeline fails fast at client use if absent.
+    tmdb_api_key: str | None = Field(None, alias="TMDB_API_KEY")
+    youtube_api_key: str | None = Field(None, alias="YOUTUBE_API_KEY")
 
     gcp_project: str = Field(..., alias="GCP_PROJECT")
     bq_dataset: str = Field("movie_trailers", alias="BQ_DATASET")

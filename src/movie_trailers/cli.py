@@ -410,5 +410,33 @@ def send_digest(
     log.info("digest.sent", recipients=recipients)
 
 
+@app.command("generate-site-data")
+def generate_site_data_cmd(
+    dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
+    out_dir: str = typer.Option("docs/data", help="Directory to write JSON snapshots."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Write read-only JSON snapshots for the static portfolio site (docs/data).
+
+    Calls only the existing read-only query layer (no writes, no YouTube quota) and
+    emits carousel / excitement / engagement / coverage / MCP-example / meta JSON for
+    the GitHub Pages site. Refreshed on a schedule by a GitHub Action.
+    """
+    from movie_trailers.site.builder import generate_site_data
+
+    _configure_logging(verbose)
+    settings = load_settings()
+    if dataset:
+        settings.bq_dataset = dataset
+    bq = BigQueryClient(
+        project=settings.gcp_project,
+        dataset=settings.bq_dataset,
+        location=settings.bq_location,
+    )
+    log.info("site.generate", out_dir=out_dir, dataset=settings.bq_dataset)
+    written = generate_site_data(bq, settings, out_dir)
+    log.info("site.generated", files=list(written))
+
+
 if __name__ == "__main__":
     app()
