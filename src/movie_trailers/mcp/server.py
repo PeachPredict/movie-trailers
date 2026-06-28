@@ -251,9 +251,27 @@ def prediction_track_record() -> dict[str, Any]:
     return _serialize(track_record(_client()))
 
 
-def main() -> None:
-    """Entrypoint for `mt mcp` and `python -m movie_trailers.mcp.server`."""
-    mcp.run()
+def main(
+    transport: str = "stdio",
+    host: str | None = None,
+    port: int | None = None,
+) -> None:
+    """Entrypoint for `mt mcp` and `python -m movie_trailers.mcp.server`.
+
+    Args:
+        transport: 'stdio' (default, for Claude Desktop / IDE clients that spawn
+            the process) or 'streamable-http' (a long-running HTTP server, for a
+            local deployment — the endpoint is served at /mcp).
+        host: bind address for the HTTP transport (ignored for stdio). Defaults
+            to 127.0.0.1 so the server is reachable only from the same machine.
+        port: TCP port for the HTTP transport (ignored for stdio). Defaults to 8000.
+    """
+    if transport == "streamable-http":
+        mcp.settings.host = host or "127.0.0.1"
+        mcp.settings.port = port or 8000
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

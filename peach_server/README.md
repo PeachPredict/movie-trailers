@@ -67,6 +67,41 @@ Install non-destructively (preserves any existing entries):
 crontab -l
 ```
 
+## MCP server (`mcp` service)
+
+A long-running, **read-only** MCP server over streamable-HTTP, for a local MCP
+client (Claude Desktop / IDE) on this machine. It reuses the same image, `.env`,
+and mounted ADC as the batch services; it only ever reads BigQuery.
+
+```sh
+docker compose up -d mcp          # start (detached); restarts unless stopped
+docker compose logs -f mcp        # tail
+docker compose down mcp           # stop
+```
+
+The port is published to **`127.0.0.1` only** (`MCP_PORT`, default 8000), so the
+endpoint is reachable from this machine and nowhere else — no LAN, no internet,
+no auth layer needed. Point a local client at:
+
+```
+http://localhost:8000/mcp
+```
+
+e.g. in a Claude Desktop config (streamable-HTTP transport):
+
+```json
+{
+  "mcpServers": {
+    "movie-trailers": { "url": "http://localhost:8000/mcp" }
+  }
+}
+```
+
+Tool reference: [`../src/movie_trailers/mcp/README.md`](../src/movie_trailers/mcp/README.md).
+To expose it beyond this machine later, front it with Tailscale / a tunnel +
+auth — do **not** change the bind to `0.0.0.0` on the host side, since every tool
+call runs a billable BigQuery query.
+
 ## Notes
 
 - `WHISPER_MODEL_NAME` defaults to `medium` in `.env.example`, matching the

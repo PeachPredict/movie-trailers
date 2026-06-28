@@ -306,15 +306,31 @@ def suggest_content(
 
 
 @app.command("mcp")
-def mcp() -> None:
-    """Serve the read-only trailer dataset over MCP (stdio transport).
+def mcp(
+    http: bool = typer.Option(
+        False,
+        "--http",
+        help="Serve over streamable-HTTP instead of stdio (long-running local server at /mcp).",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        help="Bind address for --http. Default 127.0.0.1 keeps it reachable only from this machine.",
+    ),
+    port: int = typer.Option(8000, help="TCP port for --http."),
+) -> None:
+    """Serve the read-only trailer dataset over MCP.
 
-    Point a Claude Desktop / IDE MCP client at `uv run mt mcp`. Needs the same
+    Default (stdio): point a Claude Desktop / IDE MCP client at `uv run mt mcp`.
+    With --http: run a long-running server (e.g. the peach_server `mcp` compose
+    service); connect a client to http://<host>:<port>/mcp. Needs the same
     GCP_PROJECT / BQ_DATASET env as the pipeline; performs no writes.
     """
     from movie_trailers.mcp.server import main as serve_mcp
 
-    serve_mcp()
+    if http:
+        serve_mcp(transport="streamable-http", host=host, port=port)
+    else:
+        serve_mcp()
 
 
 @app.command("send-digest")

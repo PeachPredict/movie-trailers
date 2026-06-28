@@ -40,3 +40,19 @@ services:
       - send-digest
       - --period=week
       - --polish
+
+  # Read-only MCP server over streamable-HTTP. Long-running (unlike the batch
+  # services above), so it overrides the anchor's restart policy. The port is
+  # published to 127.0.0.1 only — reachable from this machine, never the LAN or
+  # internet. A local MCP client connects to http://localhost:${MCP_PORT}/mcp.
+  # Start with: docker compose up -d mcp
+  mcp:
+    <<: *mt
+    command:
+      - mcp
+      - --http
+      - --host=0.0.0.0
+      - --port=8000
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8000}:8000"
+    restart: unless-stopped

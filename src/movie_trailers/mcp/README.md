@@ -11,10 +11,15 @@ rest of the app. See [`server.py`](server.py) for the tool wiring and
 ## Running
 
 ```sh
-uv run mt mcp                       # stdio transport
+uv run mt mcp                       # stdio transport (client spawns the process)
+uv run mt mcp --http                # streamable-HTTP at http://127.0.0.1:8000/mcp
 # or
 python -m movie_trailers.mcp.server
 ```
+
+`--http` runs a long-running server (used by the peach_server `mcp` compose
+service); `--host` / `--port` tune the bind. stdio stays the default for Claude
+Desktop / IDE clients that spawn the process themselves.
 
 Needs the same environment as the pipeline: `GCP_PROJECT`, `BQ_DATASET`
 (default `movie_trailers`), `BQ_LOCATION`, and Google ADC
