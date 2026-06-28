@@ -102,6 +102,63 @@ To expose it beyond this machine later, front it with Tailscale / a tunnel +
 auth — do **not** change the bind to `0.0.0.0` on the host side, since every tool
 call runs a billable BigQuery query.
 
+## Site-data refresh (`site-data` service + cron)
+
+Regenerates the portfolio site's read-only JSON snapshots (`docs/data/*.json`)
+and pushes them to `main`, where GitHub Pages serves them. This runs **here**,
+not in GitHub Actions — the org policy `constraints/iam.disableServiceAccountKeyCreation`
+blocks the SA key that `google-github-actions/auth` needs, and the box already
+has BigQuery ADC.
+
+The `site-data` compose service runs `mt generate-site-data` and writes into the
+host repo's `docs/data` (bind-mounted), then [`refresh-site-data.sh`](refresh-site-data.sh)
+commits + pushes any change.
+
+### One-time push setup (per-repo deploy key)
+
+The repo here must be a git checkout with a write-capable remote. Push auth is a
+**dedicated deploy key** (per-repo, write-scoped, independent of any user account),
+selected via an SSH host alias so it never collides with other GitHub keys on the box:
+
+```sh
+# 1) generate a dedicated key
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/mt_deploy -C "peach_server-site-data"
+
+# 2) add the PUBLIC key as a write-enabled deploy key (run from a machine whose
+#    gh is logged into an account with admin on the repo, e.g. the Mac):
+#    gh repo deploy-key add ~/.ssh/mt_deploy.pub --title peach_server-site-data --allow-write -R PeachPredict/movie-trailers
+
+# 3) host alias that forces this key for this repo
+cat >> ~/.ssh/config <<'EOF'
+Host github-mt
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/mt_deploy
+  IdentitiesOnly yes
+EOF
+
+# 4) make ~/movie-trailers a checkout (preserves untracked .env / gcloud / models)
+cd ~/movie-trailers
+git init -b main
+git remote add origin git@github-mt:PeachPredict/movie-trailers.git
+git fetch origin
+git reset --hard origin/main
+git branch --set-upstream-to=origin/main main
+```
+
+### Schedule
+
+Run daily at **18:00 UTC** (after the 14:00 pipeline and 16:30 transcripts):
+
+```cron
+CRON_TZ=UTC
+0 18 * * * /home/rnmourao/movie-trailers/peach_server/refresh-site-data.sh >> $HOME/mt-site-data.log 2>&1
+```
+
+> On prod (`BQ_DATASET=movie_trailers`) the excitement snapshots come back empty
+> (those tables live in dev) and the page degrades gracefully; the carousel,
+> coverage, view-time-series and engagement sections are fully populated.
+
 ## Notes
 
 - `WHISPER_MODEL_NAME` defaults to `medium` in `.env.example`, matching the

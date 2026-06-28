@@ -56,3 +56,16 @@ services:
     ports:
       - "127.0.0.1:${MCP_PORT:-8000}:8000"
     restart: unless-stopped
+
+  # One-off: regenerate the portfolio site's read-only JSON snapshots straight
+  # into the host repo's docs/data, for the cron that commits + pushes them
+  # (refresh-site-data.sh). Read-only BigQuery — no writes. The service-level
+  # volumes replace the anchor's, so the ADC mount is repeated here.
+  site-data:
+    <<: *mt
+    command:
+      - generate-site-data
+      - --out-dir=/out
+    volumes:
+      - ./gcloud:/root/.config/gcloud:ro
+      - ../docs/data:/out
