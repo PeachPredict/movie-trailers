@@ -63,7 +63,9 @@ def run_daily(
     skip_tv: bool = typer.Option(False, help="Skip discover_tv."),
     skip_stats: bool = typer.Option(False, help="Skip stats."),
     skip_comments: bool = typer.Option(False, help="Skip comments."),
+    skip_excitement: bool = typer.Option(False, help="Skip comment-excitement scoring."),
     skip_transcripts: bool = typer.Option(False, help="Skip transcripts."),
+    skip_predictions: bool = typer.Option(False, help="Skip the prediction log update."),
     transcripts_limit: int | None = typer.Option(
         None, help="Override TRANSCRIPTS_MAX_PER_RUN for this run."
     ),
@@ -123,6 +125,19 @@ def run_daily(
                 )
                 ctx["notes"] = f"at_discovery={at_disco} pre_release={pre_rel}"
 
+        # Comment-excitement scoring: distilled local model (ONNX MiniLM + Ridge),
+        # zero quota / zero LLM cost. Runs after comments (needs at_discovery
+        # snapshots); feeds the per-movie excitement-decay metric.
+        if not skip_excitement:
+            with _phase(run_id, "excitement", log_rows) as ctx:
+                from movie_trailers.pipeline.excitement import run_excitement
+
+                scored, skipped = run_excitement(
+                    bq=bq, settings=settings, today=date.today(), limit=limit
+                )
+                ctx["trailers_processed"] = scored
+                ctx["notes"] = f"scored={scored} skipped={skipped}"
+
         if not skip_transcripts:
             with _phase(run_id, "transcripts", log_rows) as ctx:
                 yta_ok, whisper_ok, failures = run_transcripts(
@@ -131,6 +146,27 @@ def run_daily(
                 ctx["trailers_processed"] = yta_ok + whisper_ok + failures
                 ctx["notes"] = (
                     f"yta_ok={yta_ok} whisper_ok={whisper_ok} failures={failures}"
+                )
+
+        # Prediction log: record new trailer-due calls + resolve past ones.
+        # Private, read-mostly, no posting — builds the track record daily so the
+        # weekly digest can report an unbiased hit rate.
+        if not skip_predictions:
+            with _phase(run_id, "predictions", log_rows) as ctx:
+                from movie_trailers.content.findings import detect_findings
+                from movie_trailers.content.predictions import (
+                    record_predictions,
+                    resolve_predictions,
+                )
+
+                today = date.today()
+                findings = detect_findings(bq, days=30, top=50)
+                resolved = resolve_predictions(bq, today=today)
+                recorded = record_predictions(bq, findings, today=today)
+                ctx["trailers_processed"] = recorded
+                ctx["notes"] = (
+                    f"recorded={recorded} hits={resolved['hits']} "
+                    f"misses={resolved['misses']}"
                 )
     finally:
         _persist_run_log(bq, log_rows)
@@ -191,6 +227,96 @@ def _persist_run_log(bq: BigQueryClient, rows: list[DailyRunLogRow]) -> None:
         log.error("run_log.persist_failed", error=str(exc))
 
 
+@app.command("suggest-content")
+def suggest_content(
+    days: int = typer.Option(30, help="Lookback window for the scan."),
+    top: int = typer.Option(6, help="Max findings to include."),
+    polish: bool = typer.Option(
+        False, "--polish", help="Rewrite drafts with Claude (needs ANTHROPIC_API_KEY)."
+    ),
+    dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
+    to: str | None = typer.Option(None, "--to", help="Recipients; overrides DIGEST_EMAIL_TO."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Render HTML to --out (or stdout); do not send."
+    ),
+    out: str | None = typer.Option(None, help="When --dry-run: write HTML here instead of stdout."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Preview/email the content section standalone (read-only).
+
+    Scans for newsworthy movie states and renders dual-format drafts + the
+    prediction scoreboard. Read-only: the prediction log is written by the daily
+    pipeline (`run-daily`), not here. The same section is folded into the weekly
+    `send-digest` email — this command is for ad-hoc previews. Drafts nothing to
+    studios; a human publishes.
+    """
+    from movie_trailers.content.findings import detect_findings
+    from movie_trailers.content.polish import make_draft_fn
+    from movie_trailers.content.predictions import track_record
+    from movie_trailers.content.render import render_content_html
+
+    _configure_logging(verbose)
+    settings = load_settings()
+    if dataset:
+        settings.bq_dataset = dataset
+
+    today = date.today()
+    bq = BigQueryClient(
+        project=settings.gcp_project, dataset=settings.bq_dataset, location=settings.bq_location
+    )
+
+    log.info("content.scan", days=days, top=top)
+    findings = detect_findings(bq, days=days, top=top)
+    log.info("content.found", count=len(findings))
+    track = track_record(bq)
+
+    draft_fn = make_draft_fn(settings, polish=polish)
+    html = render_content_html(findings, today=today, draft_fn=draft_fn, track=track)
+
+    if dry_run:
+        if out:
+            Path(out).write_text(html, encoding="utf-8")
+            log.info("content.dry_run.wrote", path=out)
+        else:
+            typer.echo(html)
+        return
+
+    recipients_raw = to or settings.digest_email_to
+    sender, host = settings.smtp_sender, settings.smtp_host
+    if not recipients_raw or not sender or not host:
+        raise typer.BadParameter(
+            "suggest-content requires SMTP_HOST, SMTP_SENDER, and DIGEST_EMAIL_TO "
+            "(or --to). Use --dry-run to preview without sending."
+        )
+    recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
+    subject = f"Trailer content suggestions — {today.isoformat()}"
+    log.info("content.send", recipients=recipients)
+    send_email(
+        host=host,
+        port=settings.smtp_port,
+        username=settings.smtp_username or sender,
+        password=settings.smtp_password,
+        sender=sender,
+        recipients=recipients,
+        subject=subject,
+        html=html,
+        starttls=not settings.smtp_ssl,
+    )
+    log.info("content.sent", recipients=recipients)
+
+
+@app.command("mcp")
+def mcp() -> None:
+    """Serve the read-only trailer dataset over MCP (stdio transport).
+
+    Point a Claude Desktop / IDE MCP client at `uv run mt mcp`. Needs the same
+    GCP_PROJECT / BQ_DATASET env as the pipeline; performs no writes.
+    """
+    from movie_trailers.mcp.server import main as serve_mcp
+
+    serve_mcp()
+
+
 @app.command("send-digest")
 def send_digest(
     period: str = typer.Option("week", help="Digest window: 'week' or 'month'."),
@@ -206,9 +332,23 @@ def send_digest(
         help="Render HTML and write to --out (or stdout); do not send email.",
     ),
     out: str | None = typer.Option(None, help="When --dry-run: write HTML here instead of stdout."),
+    polish: bool = typer.Option(
+        False, "--polish", help="Rewrite the draft posts with Claude (needs ANTHROPIC_API_KEY)."
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    """Build and email the weekly/monthly trailer digest (country aggregation)."""
+    """Build and email the weekly/monthly digest: country stats + predictions & drafts.
+
+    Read-only. The country aggregation plus a 'Predictions & draft posts' section
+    (the prediction scoreboard and this period's draft posts). Predictions are
+    written by `run-daily`, not here — this only displays them. Nothing is posted
+    anywhere; you review the drafts and publish manually.
+    """
+    from movie_trailers.content.findings import detect_findings
+    from movie_trailers.content.polish import make_draft_fn
+    from movie_trailers.content.predictions import track_record
+    from movie_trailers.content.render import render_content_section
+
     _configure_logging(verbose)
     settings = load_settings()
     if dataset:
@@ -224,9 +364,16 @@ def send_digest(
 
     log.info("digest.fetch", period=period)
     countries = fetch_country_stats(bq)
-    log.info("digest.fetched", countries=len(countries))
+    findings = detect_findings(bq, days=30, top=6)
+    track = track_record(bq)
+    log.info("digest.fetched", countries=len(countries), findings=len(findings))
 
-    html = render_digest_html(period=period, today=today, country_stats=countries)
+    content_html = render_content_section(
+        findings, draft_fn=make_draft_fn(settings, polish=polish), track=track
+    )
+    html = render_digest_html(
+        period=period, today=today, country_stats=countries, content_html=content_html
+    )
 
     if dry_run:
         if out:

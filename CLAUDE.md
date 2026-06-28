@@ -15,7 +15,8 @@ Cloud Scheduler.
 Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
                                            │
                           phase order: discover_movies →
-                          discover_tv → stats → comments
+                          discover_tv → stats → comments →
+                          excitement → predictions
                                            │
                        TMDB ──┐             ├──▶ BigQuery (MERGE)
                               ↓             │
@@ -67,9 +68,12 @@ uv run mt send-digest --period=month                                   # later c
 
 - `src/movie_trailers/clients/` — TMDB, YouTube, BigQuery clients (HTTP retries via tenacity).
 - `src/movie_trailers/pipeline/` — one module per phase; `_common.py` holds shared filters.
-- `src/movie_trailers/digest/` — read-only BQ queries + HTML render + SMTP send for the weekly/monthly digest email (`mt send-digest`). No writes; safe to run anytime.
+- `src/movie_trailers/digest/` — read-only BQ queries + HTML render + SMTP send for the weekly/monthly digest email (`mt send-digest`). The digest also embeds the content section (see below). No writes; safe to run anytime.
+- `src/movie_trailers/content/` — the content engine. `findings.py` scans for newsworthy movie states (incl. `excitement_fatigue`); `predictions.py` is the **prediction log** (record/resolve/score trailer-due calls — the daily `predictions` phase is the sole writer); `drafts.py` renders dual-format (film-fan + engineering) posts; `polish.py` optional Claude rewrite; `render.py` the email section. `excitement_model.py` is the **distilled, torch-free comment-excitement scorer** (ONNX MiniLM embeddings + a numpy Ridge head; the head ships in `content/artifacts/ridge.npz`, the embedder is baked into the image). Drafts nothing externally — a human posts manually.
+- `src/movie_trailers/mcp/` — read-only MCP server (`mt mcp`) exposing the dataset as tools (search/metrics/comments/trending/engagement-trend/findings/decay/track-record/excitement-decay/excitement-trend). Tool reference: [`src/movie_trailers/mcp/README.md`](src/movie_trailers/mcp/README.md).
+- `benchmarks/excitement/` — **dev-only** distillation pipeline (never shipped): Claude labels comment-excitement, then trains the local student that the `excitement` phase runs. Refresh runbook + acceptance gate in its [`README.md`](benchmarks/excitement/README.md).
 - `src/movie_trailers/models.py` — pydantic row types that map 1:1 to BigQuery tables.
-- `src/movie_trailers/cli.py` — `mt run-daily` and `mt send-digest` Typer entrypoints.
+- `src/movie_trailers/cli.py` — `mt run-daily`, `mt send-digest`, `mt suggest-content` (read-only preview), `mt mcp` Typer entrypoints.
 - `schemas/bigquery.sql` — DDL with `${DATASET}` placeholder.
 
 ## BigQuery write pattern
@@ -90,6 +94,8 @@ Don't add ad-hoc `INSERT` queries — they break idempotency on re-runs.
 - **`credits` table dedupes by `(tmdb_id, content_kind, credit_kind, person_id)`.** A crew person who holds multiple key jobs (e.g. Director + Writer) gets one row with `job = "Director, Writer"` (comma-joined). Cast is top-10 by `order`; crew is filtered to Director/Writer/Screenplay/Producer/Executive Producer/Creator.
 - **Derived metrics live in a view, not a table.** `vw_trailer_daily_metrics` computes per-day Δviews / Δlikes / engagement ratios on the fly via window functions over `trailer_stats_daily`. API consumers should query the view, not the raw table.
 - **TMDB image paths are stored raw**, not as full URLs. `poster_path` / `backdrop_path` / `logo_path` / `profile_path` are all relative paths like `/abc.jpg`. Build URLs with `https://image.tmdb.org/t/p/<size><path>` at the API layer so consumers can pick their own size.
+- **Comment-excitement is a distilled local model, not an LLM call.** The `excitement` phase scores each trailer's `at_discovery` comment section 0–100 using `content/excitement_model.py` (ONNX MiniLM embeddings via onnxruntime + a numpy Ridge head — **no torch, no API**). A Claude teacher trains it offline (`benchmarks/excitement/`); the student reproduces the validated finding that comment excitement decays across a movie's sequential trailers (a lexicon proxy is blind to it — the decay is semantic). Scores are keyed `(youtube_video_id, model_version)`; a retrain bumps `model_version` and re-scores. Per-movie decay lives in `vw_movie_trailer_excitement`.
+- **A view over a `require_partition_filter` table must filter the base table in a CTE *before* window functions.** `vw_movie_trailer_excitement` computes `trailer_ordinal`/`n_trailers` with window functions; a `scored_date` predicate placed after them can't push down to partition elimination (BigQuery rejects the query). So the view filters `trailer_comment_excitement` inside a leading `WITH` CTE — then it's queryable with no consumer-side date predicate.
 
 ## What's deferred (not implemented yet)
 
@@ -97,3 +103,4 @@ Don't add ad-hoc `INSERT` queries — they break idempotency on re-runs.
 - Per-country revenue breakdown (would need a paid source).
 - Secret Manager (env vars are passed via `--set-env-vars` on the Cloud Run Job).
 - Terraform / IaC.
+- **Publishing the content drafts/predictions.** Deliberately not automated. The prediction log is private (BigQuery + the weekly digest email to the operator only); it runs daily to accumulate an unbiased hit rate. Posting to LinkedIn / Reddit / X is a manual step the operator takes from the email once the hit rate is trusted — nothing in this codebase posts externally.

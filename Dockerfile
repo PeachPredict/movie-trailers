@@ -29,6 +29,12 @@ ARG WHISPER_BAKE_MODEL=small
 ENV WHISPER_BAKE_MODEL=${WHISPER_BAKE_MODEL}
 RUN /app/.venv/bin/python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_BAKE_MODEL'], download_root='${WHISPER_MODEL_DIR}')"
 
+# Bake the comment-excitement embedder (ONNX MiniLM, ~90 MB) the same way as the
+# Whisper model, so the runtime never downloads at cold start. The tiny Ridge head
+# ships in src/. Keep the repo id in sync with benchmarks/excitement/03_export_embedder.py.
+ENV EXCITEMENT_MODEL_DIR=/app/models/excitement
+RUN /app/.venv/bin/python -c "import os, shutil; from huggingface_hub import hf_hub_download; d=os.environ['EXCITEMENT_MODEL_DIR']; os.makedirs(d, exist_ok=True); [shutil.copyfile(hf_hub_download(repo_id='Xenova/all-MiniLM-L6-v2', filename=r), os.path.join(d, n)) for r, n in {'onnx/model.onnx':'model.onnx','tokenizer.json':'tokenizer.json'}.items()]"
+
 # Install project.
 COPY src ./src
 RUN uv sync --frozen --no-dev

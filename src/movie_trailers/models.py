@@ -10,7 +10,8 @@ VideoType = Literal["Teaser", "Trailer", "Official Trailer"]
 TrackingStatus = Literal["active", "ended", "unavailable"]
 SnapshotKind = Literal["at_discovery", "pre_release"]
 RunPhase = Literal[
-    "discover_movies", "discover_tv", "stats", "comments", "transcripts", "box_office"
+    "discover_movies", "discover_tv", "stats", "comments", "transcripts", "box_office",
+    "predictions", "excitement",
 ]
 TranscriptSource = Literal["yta", "whisper", "failed"]
 
@@ -201,3 +202,33 @@ class DailyRunLogRow(BaseModel):
     quota_units_used: int | None = None
     errors: int | None = None
     notes: str | None = None
+
+
+class ContentPredictionRow(BaseModel):
+    prediction_id: str  # '{movie_tmdb_id}-{predicted_at}'
+    kind: str  # 'trailer_due'
+    movie_tmdb_id: int
+    title: str | None = None
+    predicted_at: date
+    horizon_days: int
+    days_to_release_at_prediction: int | None = None
+    vs_peak_at_prediction: float | None = None
+    basis: str | None = None
+    status: str = "open"  # 'open' | 'hit' | 'miss'
+    resolved_at: date | None = None
+    resolved_youtube_video_id: str | None = None
+    resolved_lag_days: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrailerCommentExcitementRow(BaseModel):
+    youtube_video_id: str
+    model_version: str  # distilled student version, e.g. 'mlv1-minilm-l6-20260627'
+    scored_date: date
+    excitement: float | None = None  # 0..100
+    snapshot_kind: SnapshotKind = "at_discovery"
+    n_comments: int | None = None
+    mean_like_count: float | None = None
+    source_snapshot_date: date | None = None
+    created_at: datetime

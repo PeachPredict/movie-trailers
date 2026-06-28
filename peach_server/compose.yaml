@@ -1,34 +1,42 @@
+# One image (mt:latest) for every run mode. The `transcripts` service builds it
+# (whisper baked in); the others reuse the same image. Shared config — image,
+# env, ADC mount, restart policy — lives in the `&mt` anchor so it's defined once.
+x-mt: &mt
+  image: mt:latest
+  env_file:
+    - .env
+  volumes:
+    # Snap docker hides dot-files in $HOME, so we mount a non-hidden copy of
+    # the ADC (see README for the one-time copy step).
+    - ./gcloud:/root/.config/gcloud:ro
+  restart: "no"
+
 services:
+  # Residential-IP transcripts pass (YouTube blocks GCP egress). Builds the
+  # shared mt:latest image. Predictions are skipped here — they run on the Cloud
+  # Run daily job right after the stats phase (fresh data); the writes are
+  # idempotent regardless.
   transcripts:
+    <<: *mt
     build:
       context: ..
       dockerfile: Dockerfile
       args:
         WHISPER_BAKE_MODEL: medium
-    image: mt-transcripts:latest
-    env_file:
-      - .env
-    volumes:
-      # Snap docker hides dot-files in $HOME, so we mount a non-hidden copy of
-      # the ADC (see README for the one-time copy step).
-      - ./gcloud:/root/.config/gcloud:ro
     command:
       - run-daily
       - --skip-movies
       - --skip-tv
       - --skip-stats
       - --skip-comments
-    restart: "no"
+      - --skip-predictions
 
-  # Weekly digest email. Reuses the same image as `transcripts` (the project is
-  # baked in by `mt`'s entrypoint). Requires SMTP_* + DIGEST_EMAIL_TO in .env.
+  # Weekly digest email: country stats + prediction scoreboard + draft posts.
+  # Needs SMTP_* + DIGEST_EMAIL_TO in .env. --polish (Claude rewrite) additionally
+  # needs ANTHROPIC_API_KEY; it falls back to template drafts without one.
   digest:
-    image: mt-transcripts:latest
-    env_file:
-      - .env
-    volumes:
-      - ./gcloud:/root/.config/gcloud:ro
+    <<: *mt
     command:
       - send-digest
       - --period=week
-    restart: "no"
+      - --polish

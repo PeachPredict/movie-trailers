@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     smtp_ssl: bool = Field(False, alias="SMTP_SSL")
     digest_email_to: str | None = Field(None, alias="DIGEST_EMAIL_TO")
 
+    # --- Content engine (optional; `mt suggest-content --polish`) ---
+    # Falls back to ANTHROPIC_API_KEY from the environment if unset.
+    anthropic_api_key: str | None = Field(None, alias="ANTHROPIC_API_KEY")
+    content_polish_model: str = Field("claude-opus-4-8", alias="CONTENT_POLISH_MODEL")
+
 
 def load_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]

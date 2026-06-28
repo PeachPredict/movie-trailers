@@ -1,0 +1,4 @@
+# Large / regenerable artifacts — the shipped head lives in src/, not here.
+artifacts/
+training_set.jsonl
+features.npz

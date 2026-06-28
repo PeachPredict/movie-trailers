@@ -17,6 +17,14 @@ dependencies = [
     "youtube-transcript-api>=1.0",
     "faster-whisper>=1.0",
     "yt-dlp>=2025.1",
+    "mcp[cli]>=1.2",
+    "anthropic>=0.49",
+    # Comment-excitement scorer (distilled local model). Present transitively via
+    # faster-whisper today; declared explicitly so the torch-free inference path
+    # (ONNX session + tokenizer + numpy dot) never breaks if that changes.
+    "onnxruntime>=1.18",
+    "tokenizers>=0.20",
+    "numpy>=1.26",
 ]
 
 [project.scripts]
@@ -31,6 +39,11 @@ dev = [
 
 [tool.uv]
 package = true
+
+# Ship the distilled excitement head (tiny .npz) inside the wheel so the runtime
+# can load it from the installed package regardless of editable vs wheel install.
+[tool.hatch.build.targets.wheel.force-include]
+"src/movie_trailers/content/artifacts/ridge.npz" = "movie_trailers/content/artifacts/ridge.npz"
 
 [build-system]
 requires = ["hatchling"]

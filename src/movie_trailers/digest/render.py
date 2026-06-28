@@ -91,6 +91,7 @@ def render_digest_html(
     period: str,
     today: date,
     country_stats: list[dict[str, Any]],
+    content_html: str = "",
 ) -> str:
     header = (
         '<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;color:#222;">'
@@ -99,7 +100,7 @@ def render_digest_html(
         f'<div style="font-size:13px;color:#666;">As of {today.isoformat()}</div>'
         "</div>"
     )
-    body = header + _render_country_stats(country_stats)
+    body = header + _render_country_stats(country_stats) + content_html
     return (
         "<!doctype html>"
         '<html><body style="margin:0;padding:24px;background:#fff;">'

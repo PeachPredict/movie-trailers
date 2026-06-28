@@ -56,7 +56,7 @@ uv run mt send-digest --period=week
 uv run mt send-digest --period=month         # later, when the monthly cadence kicks in
 ```
 
-The digest is a single aggregation: **database statistics by country** — per-origin-country counts of trailers, transcripts, comments, and status breakdown (active / ended / unavailable). A trailer with multiple origin countries is counted in each.
+The digest has two parts: **database statistics by country** (per-origin-country counts of trailers, transcripts, comments, and active / ended / unavailable status) and a **Predictions & draft posts** section — the trailer-prediction scoreboard plus this period's draft social posts. The predictions themselves are logged by the daily run's `predictions` phase (not here); the digest only displays them. Nothing is posted anywhere — you review the drafts and publish manually. Add `--polish` (needs `ANTHROPIC_API_KEY`) to have Claude rewrite the drafts; it falls back to templates without a key.
 
 For Cloud Run, deploy a second job and a weekly Scheduler entry alongside the daily one:
 
@@ -64,8 +64,8 @@ For Cloud Run, deploy a second job and a weekly Scheduler entry alongside the da
 gcloud run jobs deploy mt-digest \
   --image "us-central1-docker.pkg.dev/${GCP_PROJECT}/mt/mt:latest" \
   --region us-central1 \
-  --command mt --args "send-digest,--period=week" \
-  --set-env-vars "GCP_PROJECT=${GCP_PROJECT},BQ_DATASET=movie_trailers,SMTP_HOST=...,SMTP_PORT=587,SMTP_USERNAME=...,SMTP_PASSWORD=...,DIGEST_EMAIL_FROM=...,DIGEST_EMAIL_TO=..."
+  --command mt --args "send-digest,--period=week,--polish" \
+  --set-env-vars "GCP_PROJECT=${GCP_PROJECT},BQ_DATASET=movie_trailers,SMTP_HOST=...,SMTP_PORT=587,SMTP_USERNAME=...,SMTP_PASSWORD=...,DIGEST_EMAIL_FROM=...,DIGEST_EMAIL_TO=...,ANTHROPIC_API_KEY=..."
 gcloud scheduler jobs create http mt-digest-weekly \
   --location us-central1 \
   --schedule "0 15 * * 1"  `# Mondays 15:00 UTC, after Monday's daily run` \
