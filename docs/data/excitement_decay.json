@@ -1,1 +1,1 @@
-{"model_version":"mlv1-minilm-l6-20260627","movies":2,"declining":0,"steady":1,"rising":1,"declining_share":0.0,"median_first_last_delta":6.67,"mean_slope_per_trailer":0.281,"by_movie_trailer_count":{"2":{"movies":1,"declining":0,"steady":1,"rising":0,"declining_share":0.0,"median_first_last_delta":0.57,"mean_slope_per_trailer":0.57},"3-4":{"movies":0},"5+":{"movies":1,"declining":0,"steady":0,"rising":1,"declining_share":0.0,"median_first_last_delta":12.76,"mean_slope_per_trailer":-0.008}}}
+{}
