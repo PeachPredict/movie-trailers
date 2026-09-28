@@ -104,3 +104,33 @@ def test_comment_threads_returns_items():
     result = yt.comment_threads_top("vid123", max_results=30)
     assert len(result.items) == 1
     assert yt.quota_units_used == 1
+
+
+@respx.mock
+def test_search_videos_costs_100_units_and_passes_filters():
+    route = respx.get("https://www.googleapis.com/youtube/v3/search").mock(
+        return_value=httpx.Response(200, json={"items": [{"id": {"videoId": "x"}}]})
+    )
+    yt = YouTubeClient(api_key="k")
+    items = yt.search_videos(
+        "Karuppu trailer", published_after="2025-05-15T00:00:00Z",
+        relevance_language="ta", region_code="IN",
+    )
+    assert items[0]["id"]["videoId"] == "x"
+    assert yt.quota_units_used == 100
+    params = route.calls.last.request.url.params
+    assert params["type"] == "video"
+    assert params["relevanceLanguage"] == "ta"
+    assert params["regionCode"] == "IN"
+
+
+@respx.mock
+def test_search_videos_raises_on_quota_exceeded():
+    respx.get("https://www.googleapis.com/youtube/v3/search").mock(
+        return_value=httpx.Response(
+            403, json={"error": {"errors": [{"reason": "quotaExceeded"}], "code": 403}}
+        )
+    )
+    yt = YouTubeClient(api_key="k")
+    with pytest.raises(QuotaExceededError):
+        yt.search_videos("x trailer")

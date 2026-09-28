@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import structlog
 
 from movie_trailers.clients.bigquery import BigQueryClient
 from movie_trailers.clients.tmdb import TMDBClient
+from movie_trailers.clients.youtube import YouTubeClient
 from movie_trailers.config import Settings
-from movie_trailers.models import CreditRow, MovieRow, TrailerRow, WatchProviderRow
+from movie_trailers.models import (
+    CreditRow,
+    MovieRow,
+    TrackingStatus,
+    TrailerRow,
+    WatchProviderRow,
+)
 from movie_trailers.pipeline._common import (
     classify_video_type,
     credits_from_details,
@@ -17,6 +25,7 @@ from movie_trailers.pipeline._common import (
     parse_languages,
     parse_origin_countries,
     parse_published_at,
+    title_languages,
     watch_providers_from_details,
 )
 
@@ -108,28 +117,14 @@ def run_discover_movies(
             )
 
             try:
-                videos = tmdb.movie_videos(tmdb_id)
+                videos = tmdb.movie_videos(tmdb_id, title_languages(details))
             except Exception as exc:  # noqa: BLE001
                 log.warning("discover_movies.videos_failed", tmdb_id=tmdb_id, error=str(exc))
                 continue
 
-            for v in videos:
-                if not is_trailer_video(v):
-                    continue
-                trailer_rows.append(
-                    TrailerRow(
-                        youtube_video_id=str(v["key"]),
-                        content_kind="movie",
-                        movie_tmdb_id=tmdb_id,
-                        video_type=classify_video_type(v),  # type: ignore[arg-type]
-                        name=v.get("name"),
-                        published_at=parse_published_at(v.get("published_at")),
-                        official=v.get("official"),
-                        tracking_end_date=release_date,
-                        first_seen_at=now,
-                        last_collected_at=now,
-                    )
-                )
+            trailer_rows.extend(
+                movie_trailer_rows(videos, tmdb_id=tmdb_id, release_date=release_date, now=now)
+            )
         if limit is not None and len(seen_tmdb_ids) >= limit:
             break
 
@@ -145,6 +140,109 @@ def run_discover_movies(
         credits=len(credit_rows),
     )
     return len(movie_rows), len(trailer_rows)
+
+
+def movie_trailer_rows(
+    videos: list[dict[str, Any]],
+    *,
+    tmdb_id: int,
+    release_date: date | None,
+    now: datetime,
+    tracking_status: TrackingStatus = "active",
+) -> list[TrailerRow]:
+    return [
+        TrailerRow(
+            youtube_video_id=str(v["key"]),
+            content_kind="movie",
+            movie_tmdb_id=tmdb_id,
+            video_type=classify_video_type(v),  # type: ignore[arg-type]
+            name=v.get("name"),
+            published_at=parse_published_at(v.get("published_at")),
+            official=v.get("official"),
+            tracking_end_date=release_date,
+            first_seen_at=now,
+            last_collected_at=now,
+            tracking_status=tracking_status,
+        )
+        for v in videos
+        if is_trailer_video(v)
+    ]
+
+
+def run_backfill_movie_trailers(
+    *,
+    tmdb: TMDBClient,
+    youtube: YouTubeClient,
+    bq: BigQueryClient,
+    settings: Settings,
+    since: date,
+    today: date | None = None,
+    limit: int | None = None,
+) -> tuple[int, int]:
+    """Re-fetch TMDB videos in each title's own languages for movies already in `movies`.
+
+    One-off repair for the non-English trailers the English-only /videos call used
+    to drop (English ones are skipped — discovery already has them). Covers
+    movies released on/after `since`, including ones that already left the discovery
+    window. New trailers of movies past `release + tracking_grace_days` are inserted
+    as `ended` (so comments never label a post-release snapshot `at_discovery`), but
+    every new trailer gets one stats snapshot now so it has views/channel/duration.
+
+    Returns (movies_scanned, new_trailers).
+    """
+    from movie_trailers.pipeline.stats import collect_stats
+
+    today = today or datetime.now(UTC).date()
+    sql = f"""
+    SELECT tmdb_id, original_language, spoken_languages, primary_release_date
+    FROM `{bq.project}.{bq.dataset}.movies`
+    WHERE primary_release_date >= @since
+    ORDER BY popularity DESC
+    LIMIT @limit
+    """
+    movies = bq.query(sql, {"since": since, "limit": limit if limit is not None else 1_000_000})
+    known = {
+        r["youtube_video_id"]
+        for r in bq.query(f"SELECT youtube_video_id FROM `{bq.project}.{bq.dataset}.trailers`")
+    }
+
+    rows: list[TrailerRow] = []
+    now = datetime.now(UTC)
+    for m in movies:
+        release_date: date | None = m["primary_release_date"]
+        try:
+            videos = tmdb.movie_videos(int(m["tmdb_id"]), title_languages(m))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("backfill.videos_failed", tmdb_id=m["tmdb_id"], error=str(exc))
+            continue
+        past_window = release_date is not None and today > release_date + timedelta(
+            days=settings.tracking_grace_days
+        )
+        # Only what the old English-only request dropped; English videos were already
+        # collected daily while the movie was in the discovery window.
+        videos = [v for v in videos if v.get("iso_639_1") != "en"]
+        rows.extend(
+            r
+            for r in movie_trailer_rows(
+                videos,
+                tmdb_id=int(m["tmdb_id"]),
+                release_date=release_date,
+                now=now,
+                tracking_status="ended" if past_window else "active",
+            )
+            if r.youtube_video_id not in known
+            # Post-release uploads ("Coming to Disney+", home-video spots) are outside
+            # the trailer window and would never have been tracked by discovery.
+            and not (
+                release_date and r.published_at and r.published_at.date() > release_date
+            )
+        )
+
+    _upsert_trailers(bq, rows)
+    new_ids = list(dict.fromkeys(r.youtube_video_id for r in rows))
+    collect_stats(youtube=youtube, bq=bq, video_ids=new_ids, today=today)
+    log.info("backfill.done", movies=len(movies), new_trailers=len(new_ids))
+    return len(movies), len(new_ids)
 
 
 def _upsert_movies(bq: BigQueryClient, rows: list[MovieRow]) -> None:

@@ -20,8 +20,12 @@ from movie_trailers.digest.queries import fetch_country_stats
 from movie_trailers.digest.render import render_digest_html
 from movie_trailers.models import DailyRunLogRow
 from movie_trailers.pipeline.comments import run_comments
-from movie_trailers.pipeline.discover_movies import run_discover_movies
+from movie_trailers.pipeline.discover_movies import (
+    run_backfill_movie_trailers,
+    run_discover_movies,
+)
 from movie_trailers.pipeline.discover_tv import run_discover_tv
+from movie_trailers.pipeline.search_trailers import run_search_trailers
 from movie_trailers.pipeline.stats import run_stats
 from movie_trailers.pipeline.transcripts import run_transcripts
 
@@ -61,6 +65,9 @@ def run_daily(
     limit: int | None = typer.Option(None, help="Cap movies/shows/trailers per phase (testing)."),
     skip_movies: bool = typer.Option(False, help="Skip discover_movies."),
     skip_tv: bool = typer.Option(False, help="Skip discover_tv."),
+    skip_search: bool = typer.Option(
+        False, help="Skip the YouTube-search fallback for trailerless movies."
+    ),
     skip_stats: bool = typer.Option(False, help="Skip stats."),
     skip_comments: bool = typer.Option(False, help="Skip comments."),
     skip_excitement: bool = typer.Option(False, help="Skip comment-excitement scoring."),
@@ -71,7 +78,7 @@ def run_daily(
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    """Run the full daily pipeline: discover (movies + tv) → stats → comments."""
+    """Run the full daily pipeline: discover (movies + tv) → search → stats → comments."""
     _configure_logging(verbose)
     settings = load_settings()
     if dataset:
@@ -107,11 +114,24 @@ def run_daily(
                 ctx["trailers_processed"] = trailers
                 ctx["notes"] = f"shows={shows} seasons={seasons}"
 
+        # YouTube search fallback (100 units/search, capped by SEARCH_MAX_UNITS) for
+        # upcoming Indian/Arabic movies TMDB has no trailer for. Runs before stats so
+        # anything it finds gets its first stats + comments snapshot the same day.
+        if not skip_search:
+            with _phase(run_id, "search_trailers", log_rows) as ctx:
+                searches, found = run_search_trailers(
+                    youtube=youtube, bq=bq, settings=settings, limit=limit
+                )
+                ctx["trailers_processed"] = found
+                ctx["quota_units_used"] = youtube.quota_units_used
+                ctx["notes"] = f"searches={searches}"
+
+        quota_before_stats = youtube.quota_units_used
         if not skip_stats:
             with _phase(run_id, "stats", log_rows) as ctx:
                 n = run_stats(youtube=youtube, bq=bq, settings=settings, limit=limit)
                 ctx["trailers_processed"] = n
-                ctx["quota_units_used"] = youtube.quota_units_used
+                ctx["quota_units_used"] = youtube.quota_units_used - quota_before_stats
 
         quota_before_comments = youtube.quota_units_used
         if not skip_comments:
@@ -174,6 +194,42 @@ def run_daily(
         youtube.close()
 
     log.info("run.end", run_id=run_id, quota_total=youtube.quota_units_used)
+
+
+@app.command("backfill-trailers")
+def backfill_trailers(
+    since: str = typer.Option(
+        ..., help="Re-fetch TMDB trailers (all languages) for movies released on/after this date."
+    ),
+    dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
+    limit: int | None = typer.Option(None, help="Cap movies scanned (most popular first)."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """One-off repair: add trailers the old English-only TMDB /videos call dropped.
+
+    Zero search quota; costs 1 YouTube unit per 50 new trailers (one stats snapshot).
+    """
+    _configure_logging(verbose)
+    settings = load_settings()
+    if dataset:
+        settings.bq_dataset = dataset
+    tmdb = TMDBClient(settings.tmdb_api_key)
+    youtube = YouTubeClient(settings.youtube_api_key)
+    bq = BigQueryClient(
+        project=settings.gcp_project, dataset=settings.bq_dataset, location=settings.bq_location
+    )
+    try:
+        movies, added = run_backfill_movie_trailers(
+            tmdb=tmdb, youtube=youtube, bq=bq, settings=settings,
+            since=date.fromisoformat(since), limit=limit,
+        )
+    finally:
+        tmdb.close()
+        youtube.close()
+    typer.echo(
+        f"scanned {movies} movies, added {added} trailers, "
+        f"{youtube.quota_units_used} YouTube units"
+    )
 
 
 class _PhaseCtx(dict):  # type: ignore[type-arg]

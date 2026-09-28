@@ -189,7 +189,11 @@ def _str_to_filelike(s: str):
     return io.BytesIO(s.encode("utf-8"))
 
 
-def _to_query_param(name: str, value: Any) -> bigquery.ScalarQueryParameter:
+def _to_query_param(
+    name: str, value: Any
+) -> bigquery.ScalarQueryParameter | bigquery.ArrayQueryParameter:
+    if isinstance(value, (list, tuple)):
+        return bigquery.ArrayQueryParameter(name, "STRING", [str(v) for v in value])
     if isinstance(value, bool):
         return bigquery.ScalarQueryParameter(name, "BOOL", value)
     if isinstance(value, int):

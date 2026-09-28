@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 import httpx
@@ -92,8 +92,12 @@ class TMDBClient:
             params["region"] = region
         yield from self._paginate("/discover/movie", params)
 
-    def movie_videos(self, tmdb_id: int) -> list[dict[str, Any]]:
-        return self._get(f"/movie/{tmdb_id}/videos").get("results", [])
+    def movie_videos(
+        self, tmdb_id: int, languages: Iterable[str] = ()
+    ) -> list[dict[str, Any]]:
+        return self._get(
+            f"/movie/{tmdb_id}/videos", video_language_params(languages)
+        ).get("results", [])
 
     def movie_details(self, tmdb_id: int) -> dict[str, Any]:
         return self._get(
@@ -123,8 +127,25 @@ class TMDBClient:
             {"append_to_response": "external_ids,credits,watch/providers"},
         )
 
-    def tv_videos(self, tmdb_id: int) -> list[dict[str, Any]]:
-        return self._get(f"/tv/{tmdb_id}/videos").get("results", [])
+    def tv_videos(self, tmdb_id: int, languages: Iterable[str] = ()) -> list[dict[str, Any]]:
+        return self._get(
+            f"/tv/{tmdb_id}/videos", video_language_params(languages)
+        ).get("results", [])
 
-    def tv_season_videos(self, tmdb_id: int, season_number: int) -> list[dict[str, Any]]:
-        return self._get(f"/tv/{tmdb_id}/season/{season_number}/videos").get("results", [])
+    def tv_season_videos(
+        self, tmdb_id: int, season_number: int, languages: Iterable[str] = ()
+    ) -> list[dict[str, Any]]:
+        return self._get(
+            f"/tv/{tmdb_id}/season/{season_number}/videos", video_language_params(languages)
+        ).get("results", [])
+
+
+def video_language_params(languages: Iterable[str]) -> dict[str, Any]:
+    """Widen TMDB's /videos language filter beyond its en-US default.
+
+    Without `include_video_language`, TMDB returns only videos tagged English (or
+    untagged), silently dropping e.g. every Hindi/Tamil/Malayalam trailer. We always
+    add `en` and `null` (untagged) on top of the title's own languages.
+    """
+    langs = [lang for lang in dict.fromkeys([*languages, "en", "null"]) if lang]
+    return {"include_video_language": ",".join(langs)}

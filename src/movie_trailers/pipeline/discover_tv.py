@@ -18,6 +18,7 @@ from movie_trailers.pipeline._common import (
     parse_languages,
     parse_origin_countries,
     parse_published_at,
+    title_languages,
     watch_providers_from_details,
 )
 
@@ -138,7 +139,9 @@ def run_discover_tv(
                 date.fromisoformat(season["air_date"]) if season.get("air_date") else None
             )
             try:
-                videos = tmdb.tv_season_videos(tmdb_id, season_number)
+                videos = tmdb.tv_season_videos(
+                    tmdb_id, season_number, title_languages(details)
+                )
             except Exception as exc:  # noqa: BLE001
                 log.warning(
                     "discover_tv.season_videos_failed",
@@ -162,7 +165,7 @@ def run_discover_tv(
 
         # Series-level videos → attach to the anchor season.
         try:
-            series_videos = tmdb.tv_videos(tmdb_id)
+            series_videos = tmdb.tv_videos(tmdb_id, title_languages(details))
         except Exception as exc:  # noqa: BLE001
             log.warning("discover_tv.series_videos_failed", tmdb_id=tmdb_id, error=str(exc))
             series_videos = []

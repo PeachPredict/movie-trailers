@@ -15,8 +15,8 @@ Cloud Scheduler.
 Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
                                            │
                           phase order: discover_movies →
-                          discover_tv → stats → comments →
-                          excitement → predictions
+                          discover_tv → search_trailers → stats →
+                          comments → excitement → predictions
                                            │
                        TMDB ──┐             ├──▶ BigQuery (MERGE)
                               ↓             │
@@ -26,6 +26,14 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
 - **Discover** (movies + TV) is TMDB-only, **zero YouTube quota**. Each TV show's upcoming
   seasons anchor the trailer-tracking windows; series-level trailers attach to the most-imminent
   upcoming season. Each TMDB details call uses `append_to_response=external_ids,credits,watch/providers` so credits and watch_providers come for free — no extra round-trips.
+- **Search** (`search_trailers`) is the YouTube fallback for upcoming Indian/Arabic movies
+  (`SEARCH_LANGUAGES` / `SEARCH_COUNTRIES`) that still have **no** trailer after discovery.
+  `search.list` costs 100 units, so it's rationed: one search per title per release
+  checkpoint (`SEARCH_CHECKPOINTS_DAYS`, default 45/21/10/4 days out — max 400 units per
+  title), a hard per-run cap (`SEARCH_MAX_UNITS`, default 1500), most-popular first, and
+  any match stops all further searching for that title. Results are filtered hard (title
+  match, trailer word, junk words, fan-made markers in description/tags — which also
+  condemn the whole channel — and a 15–360s duration via one 1-unit `videos.list`).
 - **Stats** runs every day for every `tracking_status='active'` trailer. Batched 50 per
   `videos.list` call (parts: `statistics,snippet,contentDetails,status`). Missing IDs in the
   response are marked `tracking_status='unavailable'`. First-sighting trailer technicals
@@ -41,7 +49,8 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
 
 - `videos.list`: 1 unit per call, up to 50 IDs.
 - `commentThreads.list`: 1 unit per call.
-- Per-day spend ≈ `(active / 50) + new_discoveries + entering_pre_release_window`.
+- `search.list`: **100 units** per call (+1 for the duration check). Capped at `SEARCH_MAX_UNITS`.
+- Per-day spend ≈ `(active / 50) + new_discoveries + entering_pre_release_window + 101 × searches`.
 - With ~5–10k active trailers, daily spend is typically 1–2k units. Massive headroom.
 
 ## Build / test / run
@@ -54,7 +63,14 @@ uv run mt run-daily --verbose             # full run (needs env vars + BQ)
 uv run mt run-daily --dataset=movie_trailers_dev --limit=20 --verbose   # dry-ish run
 ```
 
-Single phase: `--skip-movies --skip-tv --skip-stats --skip-comments` flags compose.
+Single phase: `--skip-movies --skip-tv --skip-search --skip-stats --skip-comments` flags compose.
+
+One-off repair for the non-English trailers the old English-only TMDB call dropped
+(zero search quota; 1 unit per 50 new trailers for their one stats snapshot):
+
+```sh
+uv run mt backfill-trailers --since 2026-05-12
+```
 
 Digest email (read-only against BQ):
 
@@ -73,7 +89,7 @@ uv run mt send-digest --period=month                                   # later c
 - `src/movie_trailers/mcp/` — read-only MCP server (`mt mcp`) exposing the dataset as tools (search/metrics/comments/trending/engagement-trend/findings/decay/track-record/excitement-decay/excitement-trend). Tool reference: [`src/movie_trailers/mcp/README.md`](src/movie_trailers/mcp/README.md).
 - `benchmarks/excitement/` — **dev-only** distillation pipeline (never shipped): Claude labels comment-excitement, then trains the local student that the `excitement` phase runs. Refresh runbook + acceptance gate in its [`README.md`](benchmarks/excitement/README.md).
 - `src/movie_trailers/models.py` — pydantic row types that map 1:1 to BigQuery tables.
-- `src/movie_trailers/cli.py` — `mt run-daily`, `mt send-digest`, `mt suggest-content` (read-only preview), `mt mcp` Typer entrypoints.
+- `src/movie_trailers/cli.py` — `mt run-daily`, `mt backfill-trailers`, `mt send-digest`, `mt suggest-content` (read-only preview), `mt mcp` Typer entrypoints.
 - `schemas/bigquery.sql` — DDL with `${DATASET}` placeholder.
 
 ## BigQuery write pattern
@@ -87,6 +103,14 @@ Don't add ad-hoc `INSERT` queries — they break idempotency on re-runs.
 ## Non-obvious things to know
 
 - **`trailers` is polymorphic.** A row is either `(content_kind='movie', movie_tmdb_id=...)` OR `(content_kind='tv', tv_tmdb_id=..., tv_season_number=...)`. Exactly one branch is set. The `trailer_stats_daily` and `trailer_comments_snapshots` tables key only on `youtube_video_id` so they work for both.
+- **TMDB `/videos` defaults to English.** Without `include_video_language` it returns only
+  `en` videos, silently dropping e.g. every Hindi/Tamil/Malayalam trailer. All three video
+  calls pass the title's `original_language` (+ `spoken_languages` for non-English titles —
+  on Indian films those are the dubbed releases) plus `en,null`. English titles stay
+  `en`-only: their spoken languages are incidental dialogue and pull in dubbed
+  foreign-market trailers.
+- **Search-found trailers** have `official = NULL` (not curated by TMDB); their provenance is
+  `trailer_search_log.matched_video_ids`. That table is not auto-created on fresh datasets.
 - **Trailer filter** is Teaser + Trailer + Official Trailer (the last is a name-based promotion within `type=Trailer`). Clips/Featurettes/Behind-the-Scenes are dropped at discovery.
 - **TMDB `release_date` and TV `air_date` drift.** Discover re-runs every day and recomputes `tracking_end_date`, so a postponed release keeps its trailers in the active set.
 - **YouTube quota resets at midnight Pacific Time** — the schedule (14:00 UTC) is chosen to be well clear of that boundary.

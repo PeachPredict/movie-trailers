@@ -187,7 +187,7 @@ OPTIONS (description = "Top cast + key crew per title. MERGE key: (tmdb_id, cont
 
 CREATE TABLE IF NOT EXISTS `${DATASET}.daily_run_log` (
   run_id STRING NOT NULL,
-  phase STRING NOT NULL,                    -- 'discover_movies' | 'discover_tv' | 'stats' | 'comments' | 'transcripts' | 'box_office'
+  phase STRING NOT NULL,                    -- 'discover_movies' | 'discover_tv' | 'search_trailers' | 'stats' | 'comments' | 'transcripts' | 'box_office'
   started_at TIMESTAMP NOT NULL,
   finished_at TIMESTAMP,
   trailers_processed INT64,
@@ -234,6 +234,17 @@ OPTIONS (
   description = "Per-trailer comment-excitement (0-100) from the distilled local model (ONNX MiniLM + Ridge). MERGE key: (youtube_video_id, model_version). One row per trailer per model version; refreshed when the model is retrained. Source of the per-movie excitement-decay metric.",
   require_partition_filter = TRUE
 );
+
+CREATE TABLE IF NOT EXISTS `${DATASET}.trailer_search_log` (
+  movie_tmdb_id INT64 NOT NULL,
+  searched_date DATE NOT NULL,
+  searched_at TIMESTAMP NOT NULL,
+  query STRING,                             -- the search.list q= string
+  results_returned INT64,
+  matched_video_ids ARRAY<STRING>,          -- trailers inserted from this search (provenance)
+  quota_units INT64                         -- search.list (100) + videos.list duration check (1)
+)
+OPTIONS (description = "YouTube search.list fallback calls for upcoming Indian/Arabic movies TMDB lists no trailer for. MERGE key: (movie_tmdb_id, searched_date). Drives per-title rationing: one search per release checkpoint (SEARCH_CHECKPOINTS_DAYS). matched_video_ids marks which trailers came from search rather than TMDB.");
 
 -- -----------------------------------------------------------------------------
 -- Derived metrics view: per-trailer daily deltas and engagement ratios.

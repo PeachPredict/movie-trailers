@@ -1,4 +1,8 @@
-from movie_trailers.pipeline._common import classify_video_type, is_trailer_video
+from movie_trailers.pipeline._common import (
+    classify_video_type,
+    is_trailer_video,
+    title_languages,
+)
 
 
 def test_is_trailer_video_keeps_teaser_and_trailer():
@@ -26,3 +30,14 @@ def test_classify_video_type_promotes_official_trailer_by_name():
 def test_classify_video_type_passthrough():
     assert classify_video_type({"type": "Teaser", "name": "Sneak Peek"}) == "Teaser"
     assert classify_video_type({"type": "Trailer", "name": "First Look"}) == "Trailer"
+
+
+def test_title_languages_from_details_or_bq_row():
+    details = {
+        "original_language": "ml",
+        "spoken_languages": [{"iso_639_1": "ml"}, {"iso_639_1": "ta"}, {"iso_639_1": None}],
+    }
+    assert title_languages(details) == ["ml", "ta"]
+    assert title_languages({"original_language": "xx", "spoken_languages": None}) == []
+    english = {"original_language": "en", "spoken_languages": [{"iso_639_1": "es"}]}
+    assert title_languages(english) == ["en"]

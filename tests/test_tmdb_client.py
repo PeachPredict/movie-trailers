@@ -51,3 +51,23 @@ def test_tv_season_videos_calls_correct_path():
         videos = tmdb.tv_season_videos(100, 2)
     assert route.called
     assert videos == []
+
+
+@respx.mock
+def test_movie_videos_widens_language_filter():
+    route = respx.get("https://api.themoviedb.org/3/movie/7/videos").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    with TMDBClient("k") as tmdb:
+        tmdb.movie_videos(7, ["ml", "ta", "ml"])
+    assert route.calls.last.request.url.params["include_video_language"] == "ml,ta,en,null"
+
+
+@respx.mock
+def test_movie_videos_defaults_to_en_and_untagged():
+    route = respx.get("https://api.themoviedb.org/3/movie/7/videos").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    with TMDBClient("k") as tmdb:
+        tmdb.movie_videos(7)
+    assert route.calls.last.request.url.params["include_video_language"] == "en,null"

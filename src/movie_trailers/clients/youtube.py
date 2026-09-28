@@ -31,6 +31,7 @@ class YouTubeClient:
 
     - videos.list: 1 unit per call, up to 50 IDs per call.
     - commentThreads.list: 1 unit per call, up to 100 results per page.
+    - search.list: 100 units per call — budget it (see pipeline/search_trailers.py).
     Quota is reset by YouTube at midnight Pacific Time.
     """
 
@@ -131,3 +132,37 @@ class YouTubeClient:
         if resp.status_code >= 400:
             resp.raise_for_status()
         return CommentsResult(items=resp.json().get("items", []))
+
+    def search_videos(
+        self,
+        query: str,
+        *,
+        published_after: str | None = None,
+        relevance_language: str | None = None,
+        region_code: str | None = None,
+        max_results: int = 10,
+    ) -> list[dict[str, Any]]:
+        """search.list for videos by relevance. Costs 100 units — 100x videos.list.
+
+        `published_after` is RFC 3339 (e.g. "2026-01-01T00:00:00Z").
+        """
+        params: dict[str, Any] = {
+            "part": "snippet",
+            "type": "video",
+            "order": "relevance",
+            "q": query,
+            "maxResults": max_results,
+        }
+        if published_after:
+            params["publishedAfter"] = published_after
+        if relevance_language:
+            params["relevanceLanguage"] = relevance_language
+        if region_code:
+            params["regionCode"] = region_code
+        resp = self._get("/search", params)
+        self.quota_units_used += 100
+        if resp.status_code >= 400:
+            if "quotaExceeded" in self._parse_error_reasons(resp):
+                raise QuotaExceededError("YouTube search.list quota exceeded")
+            resp.raise_for_status()
+        return resp.json().get("items", [])

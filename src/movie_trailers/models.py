@@ -11,7 +11,7 @@ TrackingStatus = Literal["active", "ended", "unavailable"]
 SnapshotKind = Literal["at_discovery", "pre_release"]
 RunPhase = Literal[
     "discover_movies", "discover_tv", "stats", "comments", "transcripts", "box_office",
-    "predictions", "excitement",
+    "predictions", "excitement", "search_trailers",
 ]
 TranscriptSource = Literal["yta", "whisper", "failed"]
 
@@ -191,6 +191,18 @@ class BoxOfficeRow(BaseModel):
     release_date_used: date | None = None
     tmdb_popularity_at_capture: float | None = None
     captured_at: datetime
+
+
+class TrailerSearchLogRow(BaseModel):
+    """One YouTube search.list call made to find a movie's missing trailers."""
+
+    movie_tmdb_id: int
+    searched_date: date
+    searched_at: datetime
+    query: str
+    results_returned: int
+    matched_video_ids: list[str] = Field(default_factory=list)
+    quota_units: int
 
 
 class DailyRunLogRow(BaseModel):

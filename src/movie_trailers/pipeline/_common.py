@@ -51,6 +51,23 @@ def parse_languages(items: list[dict[str, Any]] | None) -> list[SpokenLanguage]:
     ]
 
 
+def title_languages(details: dict[str, Any]) -> list[str]:
+    """ISO 639-1 codes a title's trailers are likely tagged with on TMDB.
+
+    Works on both a TMDB details payload and a `movies`/`tv_shows` BQ row (same
+    `original_language` + `spoken_languages[].iso_639_1` shape). Spoken languages
+    count only for non-English titles: on Indian films they list the dubbed
+    releases (Tamil/Telugu/Hindi versions); on English films they are incidental
+    dialogue and would pull in dubbed foreign-market trailers.
+    """
+    original = details.get("original_language")
+    if original == "en":
+        return ["en"]
+    langs = [original]
+    langs += [sl.get("iso_639_1") for sl in (details.get("spoken_languages") or [])]
+    return [str(lang) for lang in dict.fromkeys(langs) if lang and lang != "xx"]
+
+
 def parse_origin_countries(details: dict[str, Any]) -> list[str]:
     # TV uses `origin_country` (list of ISO codes); movies use `production_countries` (list of dicts).
     if "origin_country" in details and isinstance(details["origin_country"], list):

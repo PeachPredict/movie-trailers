@@ -35,12 +35,35 @@ def run_stats(
         log.info("stats.no_active_trailers")
         return 0
 
+    written, unavailable = collect_stats(
+        youtube=youtube, bq=bq, video_ids=active_ids, today=today
+    )
+    _mark_ended(bq, today)
+    log.info(
+        "stats.done",
+        active=len(active_ids),
+        stats_written=written,
+        unavailable=unavailable,
+        quota_units_used=youtube.quota_units_used,
+    )
+    return written
+
+
+def collect_stats(
+    *, youtube: YouTubeClient, bq: BigQueryClient, video_ids: list[str], today: date
+) -> tuple[int, int]:
+    """Snapshot stats + first-sighting technicals for `video_ids` (1 unit per 50).
+
+    Returns (stats_rows_written, unavailable_count).
+    """
+    if not video_ids:
+        return 0, 0
     stats_rows: list[TrailerStatsDailyRow] = []
     channel_updates: list[dict[str, Any]] = []
     unavailable_ids: list[str] = []
     now = datetime.now(UTC)
 
-    for chunk in _chunks(active_ids, BATCH_SIZE):
+    for chunk in _chunks(video_ids, BATCH_SIZE):
         try:
             items = youtube.videos_list(chunk)
         except Exception as exc:
@@ -87,15 +110,7 @@ def run_stats(
     _insert_stats(bq, stats_rows, today)
     _apply_channel_updates(bq, channel_updates)
     _mark_unavailable(bq, unavailable_ids, now)
-    _mark_ended(bq, today)
-    log.info(
-        "stats.done",
-        active=len(active_ids),
-        stats_written=len(stats_rows),
-        unavailable=len(unavailable_ids),
-        quota_units_used=youtube.quota_units_used,
-    )
-    return len(stats_rows)
+    return len(stats_rows), len(unavailable_ids)
 
 
 def _select_active_video_ids(

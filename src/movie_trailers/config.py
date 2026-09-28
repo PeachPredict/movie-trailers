@@ -27,6 +27,30 @@ class Settings(BaseSettings):
         alias="TMDB_REGIONS",
     )
 
+    # --- YouTube search fallback (`search_trailers` phase) ---
+    # TMDB rarely lists Arabic (and some Indian) trailers, so upcoming titles from
+    # these languages/countries that still have NO trailer get a YouTube search.
+    # search.list costs 100 units, so it is capped per run and rationed per title.
+    search_languages: list[str] = Field(
+        default_factory=lambda: ["hi", "ta", "te", "ml", "kn", "mr", "bn", "pa", "gu", "ar"],
+        alias="SEARCH_LANGUAGES",
+    )
+    search_countries: list[str] = Field(
+        default_factory=lambda: [
+            "IN", "AE", "SA", "EG", "MA", "DZ", "TN", "LB", "JO", "IQ",
+            "KW", "QA", "BH", "OM", "SY", "PS", "LY", "SD", "YE",
+        ],
+        alias="SEARCH_COUNTRIES",
+    )
+    # Each title is searched at most once per checkpoint (days before release):
+    # on entering the window, then again as release nears and trailers drop.
+    # 4 checkpoints = at most 400 units per title that never gets a trailer.
+    search_checkpoints_days: list[int] = Field(
+        default_factory=lambda: [45, 21, 10, 4], alias="SEARCH_CHECKPOINTS_DAYS"
+    )
+    search_max_units: int = Field(1500, alias="SEARCH_MAX_UNITS")
+    search_max_matches: int = Field(2, alias="SEARCH_MAX_MATCHES")
+
     # --- Digest email (optional; only required when running `mt send-digest`) ---
     smtp_host: str | None = Field(None, alias="SMTP_HOST")
     smtp_port: int = Field(587, alias="SMTP_PORT")
