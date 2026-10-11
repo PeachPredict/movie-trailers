@@ -16,11 +16,14 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
                                            │
                           phase order: discover_movies →
                           discover_tv → search_trailers → stats →
-                          comments → excitement → predictions
+                          comments → excitement → transcripts →
+                          predictions → box_office
                                            │
                        TMDB ──┐             ├──▶ BigQuery (MERGE)
                               ↓             │
-                       YouTube Data API ────┘
+                       YouTube Data API ────┤
+                       OMDb (US gross) ─────┘
+                       ANCINE CSV (BR admissions, `mt load-ancine`)
 ```
 
 - **Discover** (movies + TV) is TMDB-only, **zero YouTube quota**. Each TV show's upcoming
@@ -52,6 +55,20 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
 - **Comments** captures top-30 by relevance **twice per trailer in its lifetime**: at first
   discovery, then on the day before `tracking_end_date`. `comments_*_captured_at` columns on
   `trailers` are the idempotency guard — once set, the pipeline never re-captures.
+- **Transcripts** run only on peach_server (YouTube blocks GCP egress), with every other
+  phase skipped there. youtube-transcript-api in the title's languages first, faster-whisper
+  fallback with per-segment confidence filtering. Each row carries `quality`
+  (`ok|suspect|hallucinated|empty`) — **consumers filter `quality='ok'`**; the VAD-off
+  "music" rescue pass hallucinates ("Thanks for watching!") often enough that the gate exists.
+  Transient failures (IP block, yt-dlp) retry up to 3 runs; `mt requeue-transcripts` clears
+  the guard for a class of rows.
+- **Box office** (`box_office`, after predictions): for tracked movies released in the last
+  180 days, TMDB `revenue` (worldwide, lifetime) and — with `OMDB_API_KEY` — OMDb's US
+  domestic gross, re-observed weekly per title into `box_office_observations` (long format).
+  Brazilian admissions are a file, not an API: `mt load-ancine` (peach_server, weekly)
+  parses ANCINE's open-data CSV and matches titles to `movies` by original title (then a
+  verified TMDB search on the Brazilian title); unmatched titles are listed, never guessed.
+  `vw_movie_box_office` gives one value per (movie, market).
 - Tracking window: trailer `published_at` → movie `release_date` (or TV season `air_date`),
   plus a `tracking_grace_days` buffer. Stats collects while inside the window and flips
   `tracking_status='ended'` the day after it — so `active` means exactly "still collected".
@@ -93,14 +110,19 @@ uv run mt send-digest --period=month                                   # later c
 
 ## Code layout
 
-- `src/movie_trailers/clients/` — TMDB, YouTube, BigQuery clients (HTTP retries via tenacity).
-- `src/movie_trailers/pipeline/` — one module per phase; `_common.py` holds shared filters.
+- `src/movie_trailers/clients/` — TMDB, YouTube, OMDb, BigQuery clients (HTTP retries via tenacity).
+  `BigQueryClient.table_exists` lets optional phases/queries degrade on datasets missing the
+  newer DDL (excitement, box office).
+- `src/movie_trailers/pipeline/` — one module per phase; `_common.py` holds shared filters;
+  `box_office.py` (TMDB + OMDb outcomes) and `ancine.py` (BR admissions CSV loader) are the
+  outcome side; `search_trailers.evaluate_candidate` is the single YouTube-result filter.
 - `src/movie_trailers/digest/` — read-only BQ queries + HTML render + SMTP send for the weekly/monthly digest email (`mt send-digest`). The digest also embeds the content section (see below). No writes; safe to run anytime.
-- `src/movie_trailers/content/` — the content engine. `findings.py` scans for newsworthy movie states (incl. `excitement_fatigue`); `predictions.py` is the **prediction log** (record/resolve/score trailer-due calls — the daily `predictions` phase is the sole writer); `drafts.py` renders dual-format (film-fan + engineering) posts; `polish.py` optional Claude rewrite; `render.py` the email section. `excitement_model.py` is the **distilled, torch-free comment-excitement scorer** (ONNX MiniLM embeddings + a numpy Ridge head; the head ships in `content/artifacts/ridge.npz`, the embedder is baked into the image). Drafts nothing externally — a human posts manually.
+- `src/movie_trailers/content/` — the content engine. `findings.py` scans for newsworthy movie states (incl. `excitement_fatigue`); `predictions.py` is the **prediction log** (the daily `predictions` phase is the sole writer) with two kinds: `trailer_due` (a trailer lands within min(21, days-to-release) days; fires only 7–45 days out) and `opening_tier` (one call per movie in its final pre-release week: high/mid/low tier from pre-release trailer views vs the last 180 days' releases, scored when the box office — BR admissions, else US gross, else WW revenue — ranks in the same tier of the same cohort; expired-with-no-data calls are `unscorable`, excluded from the hit rate); `drafts.py` renders dual-format (film-fan + engineering) posts; `polish.py` optional Claude rewrite; `render.py` the email section. `excitement_model.py` is the **distilled, torch-free comment-excitement scorer** (ONNX MiniLM embeddings + a numpy Ridge head; the head ships in `content/artifacts/ridge.npz`, the embedder is baked into the image). Drafts nothing externally — a human posts manually.
 - `src/movie_trailers/mcp/` — read-only MCP server (`mt mcp`) exposing the dataset as tools (search/metrics/comments/trending/engagement-trend/findings/decay/track-record/excitement-decay/excitement-trend). Tool reference: [`src/movie_trailers/mcp/README.md`](src/movie_trailers/mcp/README.md).
 - `benchmarks/excitement/` — **dev-only** distillation pipeline (never shipped): Claude labels comment-excitement, then trains the local student that the `excitement` phase runs. Refresh runbook + acceptance gate in its [`README.md`](benchmarks/excitement/README.md).
 - `src/movie_trailers/models.py` — pydantic row types that map 1:1 to BigQuery tables.
-- `src/movie_trailers/cli.py` — `mt run-daily`, `mt backfill-trailers`, `mt send-digest`, `mt suggest-content` (read-only preview), `mt mcp` Typer entrypoints.
+- `src/movie_trailers/cli.py` — `mt run-daily`, `mt backfill-trailers`, `mt send-digest`, `mt suggest-content` (read-only preview), `mt mcp`, plus the repairs/loaders `mt requeue-transcripts`, `mt recheck-search-trailers`, `mt load-ancine`.
+- `schemas/bigquery.sql` ends with a dated **migrations** section (idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS`). New columns/tables are never auto-created: apply them to each dataset by hand before deploying code that reads them (2026-10-11: `trailer_transcripts`, `trailer_search_log`, `content_predictions` columns; `box_office_observations` + `vw_movie_box_office`).
 - `schemas/bigquery.sql` — DDL with `${DATASET}` placeholder.
 
 ## BigQuery write pattern
@@ -121,7 +143,16 @@ Don't add ad-hoc `INSERT` queries — they break idempotency on re-runs.
   `en`-only: their spoken languages are incidental dialogue and pull in dubbed
   foreign-market trailers.
 - **Search-found trailers** have `official = NULL` (not curated by TMDB); their provenance is
-  `trailer_search_log.matched_video_ids`. That table is not auto-created on fresh datasets.
+  `trailer_search_log.matched_video_ids`, and every result the filter dropped is in
+  `trailer_search_log.rejected` (JSON, with the reason). That table is not auto-created on fresh datasets.
+- **TMDB popularity changed scale in 2025.** Upcoming titles now have a median near 1 and p90
+  near 2.6 (max ~170); any threshold on `popularity` must be calibrated to that, not to the
+  old hundreds-scale.
+- **The digest email checks outcomes.** "Resolved since <cutoff>" lists every prediction
+  scored in the period with its evidence (the trailer that landed, or the admissions/gross
+  the tier was judged on); "Trailer signal vs box office" puts recent releases' pre-release
+  views next to their observed outcome. Both read `vw_movie_box_office` and degrade to an
+  empty section where it isn't provisioned.
 - **Trailer filter** is Teaser + Trailer + Official Trailer (the last is a name-based promotion within `type=Trailer`). Clips/Featurettes/Behind-the-Scenes are dropped at discovery.
 - **TMDB `release_date` and TV `air_date` drift.** Discover re-runs every day and recomputes `tracking_end_date`, so a postponed release keeps its trailers in the active set.
 - **YouTube quota resets at midnight Pacific Time** — the schedule (14:00 UTC) is chosen to be well clear of that boundary.
@@ -134,8 +165,9 @@ Don't add ad-hoc `INSERT` queries — they break idempotency on re-runs.
 
 ## What's deferred (not implemented yet)
 
-- `box_office` phase (TMDB budget/revenue post-theatrical) — table exists in DDL; pipeline module not yet built.
-- Per-country revenue breakdown (would need a paid source).
+- Per-country revenue beyond BR/US/WW (would need a paid source). The ANCINE URL answered
+  HTTP 403 from outside Brazil during development — the loader takes a file path too.
+- TV titles get no YouTube-search fallback.
 - Secret Manager (env vars are passed via `--set-env-vars` on the Cloud Run Job).
 - Terraform / IaC.
 - **Publishing the content drafts/predictions.** Deliberately not automated. The prediction log is private (BigQuery + the weekly digest email to the operator only); it runs daily to accumulate an unbiased hit rate. Posting to LinkedIn / Reddit / X is a manual step the operator takes from the email once the hit rate is trusted — nothing in this codebase posts externally.
