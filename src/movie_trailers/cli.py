@@ -265,6 +265,32 @@ def requeue_transcripts_cmd(
     typer.echo(f"{'would re-queue' if dry_run else 're-queued'} {len(ids)} trailers", err=True)
 
 
+@app.command("recheck-search-trailers")
+def recheck_search_trailers_cmd(
+    dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
+    dry_run: bool = typer.Option(False, help="List the failing trailers without flipping them."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """One-off repair: re-apply the search-result filters to every search-found trailer.
+
+    Rows that fail (games, TV seasons, same-title other films, unconfirmed short
+    titles) are flipped to tracking_status='unavailable'; history is kept.
+    """
+    from movie_trailers.pipeline.search_trailers import recheck_search_trailers
+
+    _configure_logging(verbose)
+    settings = load_settings()
+    if dataset:
+        settings.bq_dataset = dataset
+    bq = BigQueryClient(
+        project=settings.gcp_project, dataset=settings.bq_dataset, location=settings.bq_location
+    )
+    bad = recheck_search_trailers(bq, dry_run=dry_run)
+    for b in bad:
+        typer.echo(f"{b['youtube_video_id']}\t{b['reason']}\t{b['movie']}\t{b['name']}")
+    typer.echo(f"{'would flip' if dry_run else 'flipped'} {len(bad)} trailers to unavailable", err=True)
+
+
 class _PhaseCtx(dict):  # type: ignore[type-arg]
     pass
 

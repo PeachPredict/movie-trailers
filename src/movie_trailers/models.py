@@ -212,6 +212,9 @@ class TrailerSearchLogRow(BaseModel):
     results_returned: int
     matched_video_ids: list[str] = Field(default_factory=list)
     quota_units: int
+    region_code: str | None = None
+    relevance_language: str | None = None
+    rejected: str | None = None  # JSON [{video_id, reason}] for every dropped result
 
 
 class DailyRunLogRow(BaseModel):

@@ -250,9 +250,12 @@ CREATE TABLE IF NOT EXISTS `${DATASET}.trailer_search_log` (
   query STRING,                             -- the search.list q= string
   results_returned INT64,
   matched_video_ids ARRAY<STRING>,          -- trailers inserted from this search (provenance)
-  quota_units INT64                         -- search.list (100) + videos.list duration check (1)
+  quota_units INT64,                        -- search.list (100) + videos.list duration check (1)
+  region_code STRING,                       -- search.list regionCode sent (first production country)
+  relevance_language STRING,                -- search.list relevanceLanguage sent
+  rejected STRING                           -- JSON [{video_id, reason}] for every dropped result (filter tuning without re-spending quota)
 )
-OPTIONS (description = "YouTube search.list fallback calls for upcoming Indian/Arabic movies TMDB lists no trailer for. MERGE key: (movie_tmdb_id, searched_date). Drives per-title rationing: one search per release checkpoint (SEARCH_CHECKPOINTS_DAYS). matched_video_ids marks which trailers came from search rather than TMDB.");
+OPTIONS (description = "YouTube search.list fallback calls for upcoming movies TMDB lists no trailer for (Indic/Arabic titles + any title above SEARCH_MIN_POPULARITY). MERGE key: (movie_tmdb_id, searched_date). Drives per-title rationing: one search per release checkpoint (SEARCH_CHECKPOINTS_DAYS). matched_video_ids marks which trailers came from search rather than TMDB; rejected explains every drop.");
 
 -- -----------------------------------------------------------------------------
 -- Derived metrics view: per-trailer daily deltas and engagement ratios.
@@ -326,3 +329,9 @@ ALTER TABLE `${DATASET}.trailer_transcripts`
   ADD COLUMN IF NOT EXISTS audio_duration_s FLOAT64,
   ADD COLUMN IF NOT EXISTS quality STRING,
   ADD COLUMN IF NOT EXISTS attempts INT64;
+
+-- 2026-10-11: search-fallback provenance for filter tuning.
+ALTER TABLE `${DATASET}.trailer_search_log`
+  ADD COLUMN IF NOT EXISTS region_code STRING,
+  ADD COLUMN IF NOT EXISTS relevance_language STRING,
+  ADD COLUMN IF NOT EXISTS rejected STRING;

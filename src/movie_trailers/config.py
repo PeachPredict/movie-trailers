@@ -48,7 +48,10 @@ class Settings(BaseSettings):
     search_checkpoints_days: list[int] = Field(
         default_factory=lambda: [45, 21, 10, 4], alias="SEARCH_CHECKPOINTS_DAYS"
     )
-    search_max_units: int = Field(1500, alias="SEARCH_MAX_UNITS")
+    # Any upcoming title at/above this TMDB popularity is searched regardless of
+    # language/country (TMDB's post-2025 scale: upcoming median ≈ 1, 3 ≈ top 5%).
+    search_min_popularity: float = Field(3.0, alias="SEARCH_MIN_POPULARITY")
+    search_max_units: int = Field(2500, alias="SEARCH_MAX_UNITS")
     search_max_matches: int = Field(2, alias="SEARCH_MAX_MATCHES")
 
     # --- Digest email (optional; only required when running `mt send-digest`) ---

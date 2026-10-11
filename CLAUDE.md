@@ -26,14 +26,24 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
 - **Discover** (movies + TV) is TMDB-only, **zero YouTube quota**. Each TV show's upcoming
   seasons anchor the trailer-tracking windows; series-level trailers attach to the most-imminent
   upcoming season. Each TMDB details call uses `append_to_response=external_ids,credits,watch/providers` so credits and watch_providers come for free — no extra round-trips.
-- **Search** (`search_trailers`) is the YouTube fallback for upcoming Indian/Arabic movies
-  (`SEARCH_LANGUAGES` / `SEARCH_COUNTRIES`) that still have **no** trailer after discovery.
+- **Search** (`search_trailers`) is the YouTube fallback for upcoming movies that still have
+  **no** trailer after discovery: Indian/Arabic titles (`SEARCH_LANGUAGES` / `SEARCH_COUNTRIES`,
+  TMDB's blind spot) plus any title with TMDB popularity ≥ `SEARCH_MIN_POPULARITY` (default 3 —
+  TMDB's post-2025 popularity scale puts the upcoming median near 1, so 3 ≈ top 5%).
   `search.list` costs 100 units, so it's rationed: one search per title per release
   checkpoint (`SEARCH_CHECKPOINTS_DAYS`, default 45/21/10/4 days out — max 400 units per
-  title), a hard per-run cap (`SEARCH_MAX_UNITS`, default 1500), most-popular first, and
-  any match stops all further searching for that title. Results are filtered hard (title
-  match, trailer word, junk words, fan-made markers in description/tags — which also
-  condemn the whole channel — and a 15–360s duration via one 1-unit `videos.list`).
+  title), a hard per-run cap (`SEARCH_MAX_UNITS`, default 2500), most-popular first, and
+  any match stops all further searching for that title. Results are filtered hard
+  (`evaluate_candidate`: title match with accent-folding, trailer word in ~20 languages,
+  junk words incl. season/game/update/theme/short film, "- Topic"/"Edits" channels, off-year
+  in the title, fan-made markers in description/tags — which also condemn the whole
+  channel — and a 15–360s duration via one 1-unit `videos.list`). **Short titles** (≤2
+  tokens, or 3 with a stopword) collide with games/TV/other films, so they must be
+  confirmed by a top-8 cast / director / production-company name in the video's
+  title+description+tags+channel; non-Latin-script titles may instead carry an "official"
+  marker. Every drop is logged with its reason in `trailer_search_log.rejected` — tune the
+  filters from there, not by re-spending quota. `mt recheck-search-trailers [--dry-run]`
+  re-applies the filters to past search-found rows and flips failures to `unavailable`.
 - **Stats** runs every day for every `tracking_status='active'` trailer. Batched 50 per
   `videos.list` call (parts: `statistics,snippet,contentDetails,status`). Missing IDs in the
   response are marked `tracking_status='unavailable'`. First-sighting trailer technicals
