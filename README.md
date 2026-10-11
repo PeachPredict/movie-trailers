@@ -58,8 +58,10 @@ uv run mt run-daily --dataset=movie_trailers_dev --limit=20 --verbose
 uv run mt run-daily --skip-movies --skip-tv --skip-comments --limit=20
 ```
 
-Phases: discover_movies → discover_tv → search_trailers → stats → comments → excitement →
-transcripts → predictions → box_office (each has a `--skip-…` flag). `box_office` records TMDB
+Phases: discover_movies → discover_tv → search_trailers → stats → news → comments → excitement →
+transcripts → predictions → box_office → sacnilk → wikipedia (each has a `--skip-…` flag).
+`news` reads the GDELT GKG public dataset (`--news-days N` backfills), `sacnilk` scrapes Indian
+box office from sacnilk.com politely, `wikipedia` reads infobox gross for released films. `box_office` records TMDB
 worldwide revenue and, with `OMDB_API_KEY` set, OMDb's US domestic gross for titles released
 in the last 180 days. Brazilian admissions are loaded from ANCINE's open-data CSV instead:
 

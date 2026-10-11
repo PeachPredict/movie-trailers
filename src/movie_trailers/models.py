@@ -11,7 +11,7 @@ TrackingStatus = Literal["active", "ended", "unavailable"]
 SnapshotKind = Literal["at_discovery", "pre_release"]
 RunPhase = Literal[
     "discover_movies", "discover_tv", "stats", "comments", "transcripts", "box_office",
-    "predictions", "excitement", "search_trailers",
+    "predictions", "excitement", "search_trailers", "news", "sacnilk", "wikipedia",
 ]
 TranscriptSource = Literal["yta", "whisper", "failed"]
 
@@ -196,9 +196,9 @@ class BoxOfficeObservationRow(BaseModel):
     """One box-office / admissions observation (see box_office_observations DDL)."""
 
     tmdb_id: int
-    source: Literal["tmdb", "omdb", "ancine"]
-    market: Literal["WW", "US", "BR"]
-    metric: Literal["revenue_usd", "domestic_gross_usd", "admissions", "revenue_brl"]
+    source: str  # 'tmdb' | 'omdb' | 'ancine' | 'sacnilk' | 'wikipedia'
+    market: str  # 'WW' | 'US' | 'BR' | 'IN'
+    metric: str  # see the box_office_observations DDL comment for the enum
     value: float | None = None
     cumulative: bool
     period_start: date | None = None
@@ -268,4 +268,35 @@ class TrailerCommentExcitementRow(BaseModel):
     n_comments: int | None = None
     mean_like_count: float | None = None
     source_snapshot_date: date | None = None
+    created_at: datetime
+
+
+class SacnilkPageRow(BaseModel):
+    """Per-movie cache of the Sacnilk page lookup (so unmatched titles aren't re-fetched daily)."""
+
+    tmdb_id: int
+    slug: str | None = None
+    status: str  # 'matched' | 'unmatched' | 'not_found'
+    last_fetched_at: datetime
+    last_changed_at: datetime | None = None
+    note: str | None = None
+
+
+class WikipediaPageRow(BaseModel):
+    tmdb_id: int
+    imdb_id: str | None = None
+    enwiki_title: str | None = None
+    status: str  # 'ok' | 'no_gross' | 'no_article' | 'missing'
+    resolved_at: datetime
+
+
+class MovieNewsDailyRow(BaseModel):
+    tmdb_id: int
+    date: date
+    articles: int
+    confirmed_articles: int  # title AND a cast/director name in the same article
+    articles_used: int  # confirmed for short titles, else articles
+    sources: int
+    avg_tone: float | None = None
+    top_sources: list[str] = Field(default_factory=list)
     created_at: datetime

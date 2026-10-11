@@ -212,6 +212,17 @@ call with how it was scored.
 
 > *"How did movie 1234 actually do, and did the trailer signal call it?"*
 
+---
+
+### `movie_news(movie_tmdb_id, days=30)`
+Daily news coverage from the GDELT Global Knowledge Graph: `articles`,
+`confirmed_articles` (title *and* a cast/director name in the same article),
+`articles_used` (confirmed for short titles), `sources`, `avg_tone`, `top_sources`,
+plus 7-day and period sums. A pre-release buzz signal; `media_surge` findings come
+from it.
+
+> *"Is the press suddenly talking about movie 1234?"*
+
 ## Typical chains
 
 - **Discover → drill in:** `search_trailers` (get `movie_tmdb_id`) →

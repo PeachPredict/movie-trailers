@@ -749,3 +749,28 @@ def box_office(bq: BigQueryClient, *, movie_tmdb_id: int) -> dict[str, Any]:
         "history": history,
         "prediction": preds[0] if preds else None,
     }
+
+
+def movie_news(bq: BigQueryClient, *, movie_tmdb_id: int, days: int = 30) -> dict[str, Any]:
+    """Daily GDELT news volume + tone for one movie, with 7-day and pre-release sums."""
+    if not bq.table_exists("movie_news_daily"):
+        return {"movie_tmdb_id": movie_tmdb_id, "series": [], "note": "movie_news_daily not provisioned"}
+    rows = bq.query(
+        f"""
+        SELECT n.date, n.articles, n.confirmed_articles, n.articles_used, n.sources, n.avg_tone, n.top_sources
+        FROM {_table(bq, 'movie_news_daily')} n
+        WHERE n.tmdb_id = @id AND n.date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+        ORDER BY n.date
+        """,
+        {"id": movie_tmdb_id, "days": days},
+    )
+    last7 = [r for r in rows if (date.today() - r["date"]).days <= 7]
+    tones = [r["avg_tone"] for r in rows if r["avg_tone"] is not None]
+    return {
+        "movie_tmdb_id": movie_tmdb_id,
+        "days": days,
+        "series": rows,
+        "articles_last_7d": sum(int(r["articles_used"] or 0) for r in last7),
+        "articles_total": sum(int(r["articles_used"] or 0) for r in rows),
+        "avg_tone": (sum(tones) / len(tones)) if tones else None,
+    }

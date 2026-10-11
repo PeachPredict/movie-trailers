@@ -132,10 +132,14 @@ OPTIONS (
   require_partition_filter = TRUE
 );
 
--- Box-office / admissions outcomes, one row per observation. Three sources:
---   tmdb   / WW / revenue_usd          lifetime worldwide gross (crowd-sourced, fills late), cumulative
---   omdb   / US / domestic_gross_usd   US domestic gross (Box Office Mojo via OMDb), cumulative
---   ancine / BR / admissions, revenue_brl   weekly público/renda per title (ANCINE open data), NOT cumulative
+-- Box-office / admissions outcomes, one row per observation. Sources:
+--   tmdb      / WW / revenue_usd          lifetime worldwide gross (crowd-sourced, fills late), cumulative
+--   omdb      / US / domestic_gross_usd   US domestic gross (Box Office Mojo via OMDb), cumulative
+--   ancine    / BR / admissions, revenue_brl   weekly público/renda per title (ANCINE open data), NOT cumulative
+--   sacnilk   / IN / india_net_inr, india_gross_inr, overseas_gross_inr (cumulative); net_inr_daily (per day, NOT cumulative)
+--   sacnilk   / WW / worldwide_gross_inr  cumulative
+--   wikipedia / WW / gross_inr | revenue_usd   infobox gross, currency-native, cumulative
+-- Metrics stay in their native currency: tier cohorts are per (market, metric).
 -- (replaces the never-populated `box_office` table, 2026-10.)
 CREATE TABLE IF NOT EXISTS `${DATASET}.box_office_observations` (
   tmdb_id INT64 NOT NULL,
@@ -324,6 +328,41 @@ FROM e
 JOIN `${DATASET}.trailers` t USING (youtube_video_id)
 WHERE t.content_kind = 'movie' AND t.movie_tmdb_id IS NOT NULL;
 
+-- Lookup caches + the GDELT news signal (2026-10).
+CREATE TABLE IF NOT EXISTS `${DATASET}.sacnilk_pages` (
+  tmdb_id INT64 NOT NULL,
+  slug STRING,                              -- /movie/<slug> on sacnilk.com
+  status STRING NOT NULL,                   -- 'matched' | 'unmatched' (page exists, failed verification) | 'not_found'
+  last_fetched_at TIMESTAMP NOT NULL,
+  last_changed_at TIMESTAMP,
+  note STRING
+)
+OPTIONS (description = "Per-movie Sacnilk page lookup cache. MERGE key: tmdb_id. Unmatched/not-found titles are retried weekly, not daily.");
+
+CREATE TABLE IF NOT EXISTS `${DATASET}.wikipedia_pages` (
+  tmdb_id INT64 NOT NULL,
+  imdb_id STRING,
+  enwiki_title STRING,                      -- from the Wikidata sitelink for the IMDb id
+  status STRING NOT NULL,                   -- 'ok' | 'no_gross' | 'no_article' | 'missing'
+  resolved_at TIMESTAMP NOT NULL
+)
+OPTIONS (description = "Per-movie English-Wikipedia article lookup cache. MERGE key: tmdb_id.");
+
+CREATE TABLE IF NOT EXISTS `${DATASET}.movie_news_daily` (
+  tmdb_id INT64 NOT NULL,
+  date DATE NOT NULL,
+  articles INT64,                           -- GKG records naming the title (AllNames)
+  confirmed_articles INT64,                 -- … that also name a cast/director (V2Persons)
+  articles_used INT64,                      -- confirmed_articles for short titles, else articles
+  sources INT64,                            -- distinct outlets
+  avg_tone FLOAT64,                         -- mean GKG V2Tone[0] (-100..100; typical ±5)
+  top_sources ARRAY<STRING>,
+  created_at TIMESTAMP NOT NULL
+)
+PARTITION BY date
+CLUSTER BY tmdb_id
+OPTIONS (description = "Daily news volume + tone per tracked movie from the GDELT GKG public dataset (gdelt-bq.gdeltv2.gkg_partitioned). MERGE key: (tmdb_id, date). A pre-release signal, not an outcome.");
+
 -- -----------------------------------------------------------------------------
 -- One value per (movie, market): the latest cumulative snapshot (TMDB / OMDb) or
 -- the running sum of ANCINE's weekly rows, with the date the value is good through.
@@ -380,3 +419,6 @@ ALTER TABLE `${DATASET}.content_predictions`
   ADD COLUMN IF NOT EXISTS observed_market STRING;   -- 'BR' | 'US' | 'WW'
 -- Also: the empty `box_office` table is superseded by `box_office_observations` +
 -- `vw_movie_box_office` above (CREATE them; DROP TABLE `${DATASET}.box_office` is optional).
+
+-- 2026-10-11 (b): Indian box office + news signal — CREATE the four tables above
+-- (sacnilk_pages, wikipedia_pages, movie_news_daily); no ALTERs.

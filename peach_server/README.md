@@ -42,6 +42,7 @@ This processes up to `TRANSCRIPTS_MAX_PER_RUN` trailers per invocation (default
 docker compose run --rm transcripts run-daily \
   --skip-movies --skip-tv --skip-search --skip-stats --skip-comments \
   --skip-excitement --skip-predictions --skip-box-office \
+  --skip-news --skip-sacnilk --skip-wikipedia \
   --transcripts-limit=100
 ```
 
@@ -125,6 +126,18 @@ docker compose run --rm ancine                     # writes
 ```cron
 CRON_TZ=UTC
 0 19 * * 4 cd /home/rnmourao/movie-trailers/peach_server && /snap/bin/docker compose run --rm ancine >> $HOME/mt-ancine.log 2>&1
+```
+
+## Sacnilk fallback (`sacnilk` service)
+
+The daily Cloud Run job scrapes Sacnilk's public movie pages for Indian box office
+(≤60 pages/run, 3 s apart, identified User-Agent, verified against the cast). If
+that GCP IP gets challenged the job logs `sacnilk.blocked`; then run the phase here
+instead and add `--skip-sacnilk` to the Cloud Run job:
+
+```cron
+CRON_TZ=UTC
+45 17 * * * cd /home/rnmourao/movie-trailers/peach_server && /snap/bin/docker compose run --rm sacnilk >> $HOME/mt-sacnilk.log 2>&1
 ```
 
 ## Site-data refresh (`site-data` service + cron)

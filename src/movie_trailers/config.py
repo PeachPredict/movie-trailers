@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     box_office_max_per_run: int = Field(400, alias="BOX_OFFICE_MAX_PER_RUN")
     omdb_api_key: str | None = Field(None, alias="OMDB_API_KEY")  # free tier: 1,000 calls/day
     omdb_max_per_run: int = Field(800, alias="OMDB_MAX_PER_RUN")
+    # Identification for the polite scrapers/APIs (Sacnilk, Wikipedia/Wikidata, ANCINE).
+    contact_email: str = Field("roberto@peachpredict.ai", alias="CONTACT_EMAIL")
+    # --- Sacnilk (India) — public movie pages, scraped politely ---
+    sacnilk_enabled: bool = Field(True, alias="SACNILK_ENABLED")
+    sacnilk_base_url: str = Field("https://www.sacnilk.com", alias="SACNILK_BASE_URL")
+    sacnilk_max_pages_per_run: int = Field(60, alias="SACNILK_MAX_PAGES_PER_RUN")
+    sacnilk_min_interval_s: float = Field(3.0, alias="SACNILK_MIN_INTERVAL_S")
+    sacnilk_max_age_days: int = Field(120, alias="SACNILK_MAX_AGE_DAYS")
+    # --- Wikipedia infobox gross (all tracked films) ---
+    wikipedia_max_per_run: int = Field(200, alias="WIKIPEDIA_MAX_PER_RUN")
+    # --- GDELT news signal (BigQuery public dataset) ---
+    news_days_back: int = Field(1, alias="NEWS_DAYS_BACK")
+    gdelt_table: str = Field("gdelt-bq.gdeltv2.gkg_partitioned", alias="GDELT_TABLE")
     # ANCINE (Brazil) admissions: `mt load-ancine` default source (file path or URL).
     ancine_source: str = Field(
         "https://dados.ancine.gov.br/dados-abertos/BilheteriaObrasDia.csv", alias="ANCINE_SOURCE"

@@ -39,12 +39,15 @@ DUE_MIN_TRAILER_AGE = 10  # … and nothing new has dropped in this many days
 SURGING_MAX_TRAILER_AGE = 10  # surge must be from a recent trailer
 SLIDE_RATIO = 0.90  # recent like/view below 90% of older = a real slide
 FATIGUE_DROP_PTS = 5.0  # first→last comment-excitement drop (points) that flags fatigue
+SURGE_RATIO = 3.0  # last-3-day news volume vs the prior 14 days
+SURGE_MIN_ARTICLES = 20.0  # … and at least this many articles/day now
+SURGE_MAX_DAYS_TO_RELEASE = 60
 
 
 class Finding(BaseModel):
     """One newsworthy movie state, ready to be drafted into a post."""
 
-    kind: str  # 'trailer_due' | 'surging' | 'quality_slide'
+    kind: str  # 'trailer_due' | 'surging' | 'quality_slide' | 'excitement_fatigue' | 'media_surge'
     movie_tmdb_id: int
     title: str
     headline: str  # one-line internal summary; drafts.py expands it
@@ -141,6 +144,36 @@ def _scan_excitement(bq: BigQueryClient) -> list[dict[str, Any]]:
     try:
         return bq.query(sql)
     except Exception:  # noqa: BLE001 — table/view absent (fresh dataset) → no excitement findings
+        return []
+
+
+def _scan_news(bq: BigQueryClient) -> list[dict[str, Any]]:
+    """Per-movie news volume: last 3 days vs the 14 before, for titles releasing soon.
+
+    Returns [] where `movie_news_daily` isn't provisioned (fresh dataset).
+    """
+    sql = f"""
+    WITH n AS (
+      SELECT tmdb_id, date, articles_used, avg_tone
+      FROM `{bq.project}.{bq.dataset}.movie_news_daily`
+      WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 18 DAY)
+    ),
+    agg AS (
+      SELECT tmdb_id,
+             AVG(IF(date > DATE_SUB(CURRENT_DATE(), INTERVAL 4 DAY), articles_used, NULL)) AS recent,
+             AVG(IF(date <= DATE_SUB(CURRENT_DATE(), INTERVAL 4 DAY), articles_used, NULL)) AS base,
+             AVG(IF(date > DATE_SUB(CURRENT_DATE(), INTERVAL 4 DAY), avg_tone, NULL)) AS tone,
+             ARRAY_AGG(STRUCT(date, articles_used AS dv) ORDER BY date) AS series
+      FROM n GROUP BY tmdb_id
+    )
+    SELECT a.tmdb_id AS movie_tmdb_id, a.recent, a.base, a.tone, a.series, m.title,
+           DATE_DIFF(m.primary_release_date, CURRENT_DATE(), DAY) AS days_to_release
+    FROM agg a JOIN `{bq.project}.{bq.dataset}.movies` m ON m.tmdb_id = a.tmdb_id
+    WHERE a.recent IS NOT NULL
+    """
+    try:
+        return bq.query(sql)
+    except Exception:  # noqa: BLE001 — table absent → no news findings
         return []
 
 
@@ -268,6 +301,42 @@ def detect_findings(bq: BigQueryClient, *, days: int = 30, top: int = 6) -> list
                     "excitement_delta": round(last - first, 1),
                     "slope_per_trailer": round(r["slope"], 3) if r["slope"] is not None else None,
                     "n_trailers": r["n_trailers"],
+                },
+                series=series,
+            )
+        )
+
+    # media_surge: news volume taking off ahead of release (GDELT signal)
+    for r in _scan_news(bq):
+        recent, base = r["recent"] or 0.0, r["base"]
+        d2r = r["days_to_release"]
+        if d2r is None or not (-7 <= d2r <= SURGE_MAX_DAYS_TO_RELEASE):
+            continue
+        if recent < SURGE_MIN_ARTICLES:
+            continue
+        ratio = recent / base if base else float("inf")
+        if ratio < SURGE_RATIO:
+            continue
+        ratio_s = f"{ratio:.1f}×" if ratio != float("inf") else "from nothing"
+        tone = r["tone"]
+        series = [{"date": s["date"], "dv": s["dv"]} for s in (r["series"] or [])]
+        offer(
+            Finding(
+                kind="media_surge",
+                movie_tmdb_id=r["movie_tmdb_id"],
+                title=r["title"] or f"movie {r['movie_tmdb_id']}",
+                headline=(
+                    f"{r['title']} — news volume {ratio_s} this week "
+                    f"({recent:.0f} articles/day"
+                    + (f", tone {tone:+.1f}" if tone is not None else "") + ")"
+                ),
+                salience=math.log10(max(recent, 10)) * math.log(min(ratio, 50.0) + 1.0),
+                metrics={
+                    "news_recent_per_day": round(recent, 1),
+                    "news_base_per_day": round(base, 1) if base is not None else None,
+                    "news_ratio": round(ratio, 2) if ratio != float("inf") else None,
+                    "news_tone": round(tone, 2) if tone is not None else None,
+                    "days_to_release": d2r,
                 },
                 series=series,
             )

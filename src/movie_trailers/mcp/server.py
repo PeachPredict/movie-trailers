@@ -266,6 +266,22 @@ def box_office(movie_tmdb_id: int) -> dict[str, Any]:
     return _serialize(queries.box_office(_client(), movie_tmdb_id=movie_tmdb_id))
 
 
+@mcp.tool()
+def movie_news(movie_tmdb_id: int, days: int = 30) -> dict[str, Any]:
+    """Daily news coverage of a movie from GDELT (article counts, outlets, tone).
+
+    `articles_used` is the count of GKG records naming the title — for short titles
+    only records that also name a cast member or the director (to keep "Hope" from
+    counting every hopeful headline). Tone is GDELT's V2Tone (typical range ±5).
+    A pre-release signal; compare with trailer views in movie_engagement_trend.
+
+    Args:
+        movie_tmdb_id: the movie's TMDB id (see search_trailers output).
+        days: how many days back (default 30).
+    """
+    return _serialize(queries.movie_news(_client(), movie_tmdb_id=movie_tmdb_id, days=days))
+
+
 def main(
     transport: str = "stdio",
     host: str | None = None,

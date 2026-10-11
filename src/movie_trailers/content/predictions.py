@@ -43,8 +43,10 @@ TIER_LOW_PCT = 0.50
 # (market, metric, days after release the number must be good through) — in priority order
 MARKET_PRIORITY: list[tuple[str, str, int]] = [
     ("BR", "admissions", 28),
+    ("IN", "india_net_inr", 21),  # Sacnilk; Indian runs are short, 3 weeks is the bulk of it
     ("US", "domestic_gross_usd", 28),
-    ("WW", "revenue_usd", 45),
+    ("WW", "revenue_usd", 45),  # TMDB / Wikipedia (USD)
+    ("WW", "gross_inr", 45),  # Wikipedia (INR) — Indian films ranked among Indian films
 ]
 
 _FIELDS = list(ContentPredictionRow.model_fields.keys())

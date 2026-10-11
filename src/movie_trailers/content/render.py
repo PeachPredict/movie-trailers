@@ -21,6 +21,7 @@ _KIND_LABEL = {
     "surging": "🚀 Surging",
     "quality_slide": "📉 Cooling off",
     "excitement_fatigue": "🥱 Excitement fatigue",
+    "media_surge": "📰 Media surge",
 }
 
 
@@ -94,6 +95,16 @@ def _num(v: Any, money: bool = False) -> str:
     return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n:,.0f}"
 
 
+def _inr(v: Any) -> str:
+    if v is None:
+        return "—"
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return escape(str(v))
+    return f"₹{n / 1e7:.1f} Cr" if n >= 1e6 else f"₹{n:,.0f}"
+
+
 def _outcome_text(r: dict[str, Any]) -> str:
     """What happened, for one resolved prediction row (see predictions.resolved_since)."""
     if r.get("kind") == "trailer_due":
@@ -105,7 +116,10 @@ def _outcome_text(r: dict[str, Any]) -> str:
     if metric == "none":
         return "no box-office data arrived (unscorable)"
     label = {"admissions": "BR admissions", "domestic_gross_usd": "US gross",
-             "revenue_usd": "WW revenue"}.get(str(metric), str(metric))
+             "revenue_usd": "WW revenue", "india_net_inr": "India net",
+             "gross_inr": "WW gross"}.get(str(metric), str(metric))
+    if str(metric).endswith("_inr"):
+        return f"{label} {_inr(r.get('observed_value'))} vs the cohort"
     money = metric != "admissions"
     return f"{label} {_num(r.get('observed_value'), money)} vs the cohort"
 
@@ -145,8 +159,9 @@ def _outcomes_block(rows: list[dict[str, Any]]) -> str:
     head = (
         '<h3 style="font:600 15px sans-serif;margin:16px 0 6px;color:#222">Trailer signal vs box office</h3>'
         '<p style="font:13px sans-serif;color:#666;margin:0 0 6px">Releases of the last weeks with an '
-        "observed outcome (ANCINE admissions / OMDb US gross / TMDB worldwide revenue) next to the "
-        "pre-release trailer views the opening-tier call was based on.</p>"
+        "observed outcome (ANCINE admissions / Sacnilk India net / OMDb US gross / TMDB or Wikipedia "
+        "worldwide revenue) next to the pre-release trailer views and news coverage (GDELT, 14 days "
+        "before release) the opening-tier call was based on.</p>"
     )
     if not rows:
         return head + '<p style="font:13px sans-serif;color:#666">No box-office observations yet.</p>'
@@ -161,13 +176,17 @@ def _outcomes_block(rows: list[dict[str, Any]]) -> str:
             f"<tr><td {_TD}><b>{escape(str(r.get('title') or ''))}</b><br>"
             f'<span style="color:#888">{escape(str(r.get("countries") or ""))} · {escape(str(r.get("release_date") or ""))}</span></td>'
             f"<td {_TD}>{_num(r.get('total_views'))}</td><td {_TD}>{_num(r.get('peak_daily_views'))}</td>"
-            f"<td {_TD}>{_num(r.get('br_admissions'))}</td><td {_TD}>{_num(r.get('us_gross_usd'), True)}</td>"
-            f"<td {_TD}>{_num(r.get('ww_revenue_usd'), True)}</td><td {_TD}>{call}</td></tr>"
+            f"<td {_TD}>{_num(r.get('news_pre_release'))}</td>"
+            f"<td {_TD}>{_num(r.get('br_admissions'))}</td><td {_TD}>{_inr(r.get('in_net_inr'))}</td>"
+            f"<td {_TD}>{_num(r.get('us_gross_usd'), True)}</td>"
+            f"<td {_TD}>{_num(r.get('ww_revenue_usd'), True) if r.get('ww_revenue_usd') is not None else _inr(r.get('ww_gross_inr'))}</td>"
+            f"<td {_TD}>{call}</td></tr>"
         )
     return (
         head + '<table style="border-collapse:collapse;width:100%">'
         f"<tr><th {_TH}>Movie</th><th {_TH}>Pre-release views</th><th {_TH}>Peak daily</th>"
-        f"<th {_TH}>BR admissions</th><th {_TH}>US gross</th><th {_TH}>WW revenue</th><th {_TH}>Call</th></tr>"
+        f"<th {_TH}>News (14d)</th><th {_TH}>BR admissions</th><th {_TH}>India net</th>"
+        f"<th {_TH}>US gross</th><th {_TH}>WW revenue</th><th {_TH}>Call</th></tr>"
         + "".join(trs) + "</table>"
     )
 

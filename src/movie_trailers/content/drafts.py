@@ -19,6 +19,7 @@ PLATFORMS: dict[str, list[str]] = {
     "surging": ["r/movies", "r/dataisbeautiful", "film-X/Twitter"],
     "quality_slide": ["r/boxoffice", "r/dataisbeautiful", "LinkedIn"],
     "excitement_fatigue": ["r/movies", "r/dataisbeautiful", "LinkedIn", "Hacker News"],
+    "media_surge": ["film-X/Twitter", "r/boxoffice", "LinkedIn"],
 }
 
 _STACK = "TMDB + YouTube Data API → BigQuery, daily Cloud Run job"
@@ -66,6 +67,26 @@ def drafts_for(finding: Finding) -> dict[str, object]:
             f"peak {age}d post-launch, versus a ~6-day median half-life across trailers. "
             f"Sustained velocity (not the like/view ratio) is the demand signal that "
             f"actually moves. Stack: {_STACK}."
+        )
+    elif finding.kind == "media_surge":
+        ratio = m.get("news_ratio")
+        ratio_s = f"{ratio:.0f}×" if ratio else "out of nowhere"
+        tone = m.get("news_tone")
+        tone_s = (
+            f" and the coverage is {'warm' if tone > 1 else 'cool' if tone < -1 else 'neutral'} "
+            f"(tone {tone:+.1f})" if tone is not None else ""
+        )
+        fan = (
+            f"📰 {t} is suddenly everywhere: news coverage is {ratio_s} its recent baseline "
+            f"({m.get('news_recent_per_day')} articles/day){tone_s}, {d2r} days before release. "
+            f"Buzz like this usually shows up in the opening."
+        )
+        technical = (
+            f"My pipeline flags {t} as a media surge: GDELT (the global news graph) shows "
+            f"{m.get('news_recent_per_day')} articles/day over the last 3 days vs "
+            f"{m.get('news_base_per_day')} before — {ratio_s} — {d2r}d from release. "
+            f"Matched on the title plus a cast/director name in the same article to keep "
+            f"short titles honest. Stack: {_STACK} + GDELT GKG on BigQuery."
         )
     elif finding.kind == "quality_slide":
         lv_r, lv_o = m.get("like_view_recent"), m.get("like_view_older")

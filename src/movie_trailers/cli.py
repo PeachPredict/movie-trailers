@@ -81,6 +81,12 @@ def run_daily(
     skip_box_office: bool = typer.Option(
         False, help="Skip the box-office outcomes phase (TMDB revenue + OMDb US gross)."
     ),
+    skip_news: bool = typer.Option(False, help="Skip the GDELT news-signal phase."),
+    news_days: int | None = typer.Option(
+        None, help="GDELT partitions to scan (default NEWS_DAYS_BACK=1; up to 60 for a backfill)."
+    ),
+    skip_sacnilk: bool = typer.Option(False, help="Skip the Sacnilk (India) box-office pages."),
+    skip_wikipedia: bool = typer.Option(False, help="Skip the Wikipedia infobox gross phase."),
     transcripts_limit: int | None = typer.Option(
         None, help="Override TRANSCRIPTS_MAX_PER_RUN for this run."
     ),
@@ -140,6 +146,21 @@ def run_daily(
                 n = run_stats(youtube=youtube, bq=bq, settings=settings, limit=limit)
                 ctx["trailers_processed"] = n
                 ctx["quota_units_used"] = youtube.quota_units_used - quota_before_stats
+
+        # GDELT news signal: one BigQuery query per day over the public GKG table
+        # (~150 MB/day). No external API. Runs after stats so the day's trailer
+        # numbers and the news numbers line up in the digest.
+        if not skip_news:
+            with _phase(run_id, "news", log_rows) as ctx:
+                from movie_trailers.pipeline.news import run_news
+
+                if not bq.table_exists("movie_news_daily"):
+                    log.warning("news.table_missing", dataset=settings.bq_dataset)
+                    ctx["notes"] = "table missing"
+                else:
+                    n_days, n_rows = run_news(bq=bq, settings=settings, days_back=news_days, limit=limit)
+                    ctx["trailers_processed"] = n_rows
+                    ctx["notes"] = f"days={n_days} rows={n_rows}"
 
         quota_before_comments = youtube.quota_units_used
         if not skip_comments:
@@ -227,6 +248,34 @@ def run_daily(
                             omdb.close()
                     ctx["trailers_processed"] = written
                     ctx["notes"] = f"movies={checked} observations={written}"
+
+        # Indian box office from Sacnilk's public pages (polite: ≤60 pages/run, 3 s apart,
+        # identified UA, verified against credits). Stops itself on a 403/429/503.
+        if not skip_sacnilk and settings.sacnilk_enabled:
+            with _phase(run_id, "sacnilk", log_rows) as ctx:
+                from movie_trailers.pipeline.sacnilk import run_sacnilk
+
+                if not bq.table_exists("sacnilk_pages"):
+                    log.warning("sacnilk.table_missing", dataset=settings.bq_dataset)
+                    ctx["notes"] = "table missing"
+                else:
+                    fetched, written = run_sacnilk(bq=bq, settings=settings, limit=limit)
+                    ctx["trailers_processed"] = written
+                    ctx["notes"] = f"pages={fetched} observations={written}"
+
+        # Wikipedia infobox gross for every tracked film after release (Wikidata sitelink
+        # by IMDb id → one parse call per film, ~1/s).
+        if not skip_wikipedia:
+            with _phase(run_id, "wikipedia", log_rows) as ctx:
+                from movie_trailers.pipeline.wikipedia_gross import run_wikipedia_gross
+
+                if not bq.table_exists("wikipedia_pages"):
+                    log.warning("wikipedia.table_missing", dataset=settings.bq_dataset)
+                    ctx["notes"] = "table missing"
+                else:
+                    read, written = run_wikipedia_gross(bq=bq, settings=settings, limit=limit)
+                    ctx["trailers_processed"] = written
+                    ctx["notes"] = f"articles={read} observations={written}"
     finally:
         _persist_run_log(bq, log_rows)
         tmdb.close()

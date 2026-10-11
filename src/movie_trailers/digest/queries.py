@@ -85,6 +85,18 @@ def fetch_signal_vs_outcome(bq: BigQueryClient, *, days: int = 56, limit: int = 
     """
     if not bq.table_exists("vw_movie_box_office"):
         return []
+    has_news = bq.table_exists("movie_news_daily")
+    news_cte = f"""
+    news AS (
+      SELECT n.tmdb_id, SUM(n.articles_used) AS news_pre_release, AVG(n.avg_tone) AS news_tone
+      FROM {_table(bq, "movie_news_daily")} n
+      JOIN rel r ON r.tmdb_id = n.tmdb_id
+      WHERE n.date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days + 14 DAY)
+        AND n.date BETWEEN DATE_SUB(r.rel, INTERVAL 14 DAY) AND DATE_SUB(r.rel, INTERVAL 1 DAY)
+      GROUP BY n.tmdb_id
+    ),""" if has_news else """
+    news AS (SELECT CAST(NULL AS INT64) AS tmdb_id, CAST(NULL AS INT64) AS news_pre_release,
+                    CAST(NULL AS FLOAT64) AS news_tone),"""
     sql = f"""
     WITH rel AS (
       SELECT tmdb_id, title, primary_release_date AS rel, origin_countries
@@ -112,11 +124,14 @@ def fetch_signal_vs_outcome(bq: BigQueryClient, *, days: int = 56, limit: int = 
       WHERE v.collected_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 500 DAY)
       GROUP BY 1
     ),
+    {news_cte}
     bo AS (
       SELECT tmdb_id,
              MAX(IF(market = 'BR' AND metric = 'admissions', value, NULL)) AS br_admissions,
+             MAX(IF(market = 'IN' AND metric = 'india_net_inr', value, NULL)) AS in_net_inr,
              MAX(IF(market = 'US', value, NULL)) AS us_gross_usd,
-             MAX(IF(market = 'WW', value, NULL)) AS ww_revenue_usd,
+             MAX(IF(market = 'WW' AND metric = 'revenue_usd', value, NULL)) AS ww_revenue_usd,
+             MAX(IF(market = 'WW' AND metric IN ('gross_inr', 'worldwide_gross_inr'), value, NULL)) AS ww_gross_inr,
              MAX(through_date) AS through_date
       FROM {_table(bq, "vw_movie_box_office")}
       GROUP BY tmdb_id
@@ -130,15 +145,17 @@ def fetch_signal_vs_outcome(bq: BigQueryClient, *, days: int = 56, limit: int = 
     )
     SELECT r.tmdb_id, r.title, r.rel AS release_date,
            ARRAY_TO_STRING(r.origin_countries, ',') AS countries,
-           sig.total_views, peak.peak_daily_views,
-           bo.br_admissions, bo.us_gross_usd, bo.ww_revenue_usd, bo.through_date,
+           sig.total_views, peak.peak_daily_views, news.news_pre_release, news.news_tone,
+           bo.br_admissions, bo.in_net_inr, bo.us_gross_usd, bo.ww_revenue_usd, bo.ww_gross_inr,
+           bo.through_date,
            pred.predicted_tier, pred.status AS prediction_status, pred.observed_market
     FROM rel r
     JOIN bo ON bo.tmdb_id = r.tmdb_id
     LEFT JOIN sig ON sig.movie_tmdb_id = r.tmdb_id
     LEFT JOIN peak ON peak.movie_tmdb_id = r.tmdb_id
     LEFT JOIN pred ON pred.movie_tmdb_id = r.tmdb_id
-    ORDER BY COALESCE(bo.br_admissions, bo.us_gross_usd, bo.ww_revenue_usd) DESC
+    LEFT JOIN news ON news.tmdb_id = r.tmdb_id
+    ORDER BY COALESCE(bo.br_admissions, bo.in_net_inr, bo.us_gross_usd, bo.ww_revenue_usd, bo.ww_gross_inr) DESC
     LIMIT @limit
     """
     return bq.query(sql, {"days": days, "limit": limit})

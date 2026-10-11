@@ -36,6 +36,9 @@ services:
       - --skip-excitement
       - --skip-predictions
       - --skip-box-office
+      - --skip-news
+      - --skip-sacnilk
+      - --skip-wikipedia
 
   # Weekly digest email: country stats + prediction scoreboard + draft posts.
   # Needs SMTP_* + DIGEST_EMAIL_TO in .env. --polish (Claude rewrite) additionally
@@ -62,6 +65,25 @@ services:
     ports:
       - "127.0.0.1:${MCP_PORT:-8000}:8000"
     restart: unless-stopped
+
+  # Fallback for the Sacnilk (India) phase: Cloud Run's GCP IP may get a Cloudflare
+  # challenge (the daily job logs `sacnilk.blocked`); this box's residential IP won't.
+  # Enable the cron in the README and add --skip-sacnilk to the Cloud Run job args.
+  sacnilk:
+    <<: *mt
+    command:
+      - run-daily
+      - --skip-movies
+      - --skip-tv
+      - --skip-search
+      - --skip-stats
+      - --skip-news
+      - --skip-comments
+      - --skip-excitement
+      - --skip-transcripts
+      - --skip-predictions
+      - --skip-box-office
+      - --skip-wikipedia
 
   # Weekly: load Brazilian admissions (ANCINE open data) into box_office_observations.
   # Runs here because the ANCINE host answered HTTP 403 from outside Brazil during

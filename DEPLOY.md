@@ -28,3 +28,16 @@ Order matters — code that reads the new columns ships after the DDL is applied
    `box_office` rows with `errors=0`; `SELECT quality, COUNT(*) FROM trailer_transcripts GROUP BY 1`;
    `mt send-digest --period=week --dry-run --out /tmp/d.html` shows the "Resolved since" and
    "Trailer signal vs box office" sections.
+
+## 2026-10-11 release (b): Indian box office + news signal
+
+1. **BigQuery (prod)** — `CREATE` the three tables `sacnilk_pages`, `wikipedia_pages`,
+   `movie_news_daily` from `schemas/bigquery.sql` (no ALTERs). The GDELT
+   public dataset needs no setup; the query runs in our project and is billed to it (~$0.01/day).
+2. **Cloud Run job** — rebuild + update as above. New phases `news`, `sacnilk`, `wikipedia`
+   need no env vars (`CONTACT_EMAIL` overrides the User-Agent contact). First run: pass
+   `--news-days 30` once to backfill the news signal.
+3. **Watch** the first runs' `daily_run_log`: `sacnilk` with `pages>0`; if the logs show
+   `sacnilk.blocked`, add `--skip-sacnilk` to the job args and enable the peach_server
+   `sacnilk` cron (peach_server/README.md). `wikipedia` should report `observations>0` within
+   a week for released titles.

@@ -182,12 +182,20 @@ class BigQueryClient:
             self._client.delete_table(staging_ref, not_found_ok=True)
         return len(rows)
 
-    def query(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def query(
+        self, sql: str, params: dict[str, Any] | None = None, *, location: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Run `sql` and return rows as dicts.
+
+        `location` overrides the client's dataset location for queries that only touch
+        tables elsewhere (the GDELT public dataset is in the US multi-region; BigQuery
+        can't join across locations, so such queries must not reference our dataset).
+        """
         job_config = None
         if params:
             qparams = [_to_query_param(k, v) for k, v in params.items()]
             job_config = bigquery.QueryJobConfig(query_parameters=qparams)
-        job = self._client.query(sql, job_config=job_config)
+        job = self._client.query(sql, job_config=job_config, location=location or self.location)
         return [dict(row) for row in job.result()]
 
 

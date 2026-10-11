@@ -16,13 +16,16 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
                                            │
                           phase order: discover_movies →
                           discover_tv → search_trailers → stats →
-                          comments → excitement → transcripts →
-                          predictions → box_office
+                          news → comments → excitement → transcripts →
+                          predictions → box_office → sacnilk → wikipedia
                                            │
                        TMDB ──┐             ├──▶ BigQuery (MERGE)
                               ↓             │
                        YouTube Data API ────┤
-                       OMDb (US gross) ─────┘
+                       OMDb (US gross) ─────┤
+                       Sacnilk pages (IN) ──┤
+                       Wikipedia infobox ───┤
+                       GDELT GKG (BigQuery public dataset, news signal)
                        ANCINE CSV (BR admissions, `mt load-ancine`)
 ```
 
@@ -69,6 +72,25 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
   parses ANCINE's open-data CSV and matches titles to `movies` by original title (then a
   verified TMDB search on the Brazilian title); unmatched titles are listed, never guessed.
   `vw_movie_box_office` gives one value per (movie, market).
+- **Sacnilk** (`sacnilk`, Indian releases 1–120 days out): scrapes the public
+  `sacnilk.com/movie/<slug>` pages **politely** — one index request + ≤60 pages/run,
+  ≥3 s apart, identified User-Agent, `robots.txt` re-checked, and every page verified
+  (release date ±10 days *and* a top-cast/director name from `credits` in its Cast & Crew
+  block) before a number is trusted; `sacnilk_pages` caches matched/unmatched/not-found so
+  failures retry weekly. A 403/429/503 stops the run (`sacnilk.blocked`) — move the phase to
+  peach_server then. Rows: `IN/india_net_inr`, `IN/india_gross_inr`, `IN/overseas_gross_inr`,
+  `WW/worldwide_gross_inr` (cumulative) and `IN/net_inr_daily` per day.
+- **Wikipedia** (`wikipedia`, all tracked films 7–180 days after release): infobox `gross` /
+  `budget` via the Wikidata sitelink for the IMDb id (`wikipedia_pages` cache), parsed from
+  `{{INR|330–400}} crore`, `₹143.60 crore`, `$12.3 million` etc. → `WW/gross_inr` or
+  `WW/revenue_usd`. Wikidata's own box-office claims are empty for recent films — don't use them.
+- **News** (`news`, after stats): GDELT GKG on BigQuery (`gdelt-bq.gdeltv2.gkg_partitioned`,
+  ~150 MB/day scanned ≈ $0.01/day). the target names (titles + top cast / directors, normalized) are passed
+  as query parameters and **equi-joined** against the exploded `AllNames` / `V2Persons` —
+  never LIKE scans. GDELT is in the US multi-region, so that query runs there (`location="US"`)
+  and must not reference our us-central1 dataset; results are merged from Python. `movie_news_daily.articles_used` = confirmed-by-a-person count for short
+  titles, plain title count otherwise. A pre-release *signal* (`media_surge` finding, digest
+  "News (14d)" column, MCP `movie_news`), not an outcome. `--news-days N` backfills (≤60).
 - Tracking window: trailer `published_at` → movie `release_date` (or TV season `air_date`),
   plus a `tracking_grace_days` buffer. Stats collects while inside the window and flips
   `tracking_status='ended'` the day after it — so `active` means exactly "still collected".
@@ -165,7 +187,8 @@ Don't add ad-hoc `INSERT` queries — they break idempotency on re-runs.
 
 ## What's deferred (not implemented yet)
 
-- Per-country revenue beyond BR/US/WW (would need a paid source). The ANCINE URL answered
+- Per-country revenue beyond BR/IN/US/WW (would need a paid source). Sacnilk footfalls
+  are behind their paid tier; a licensed Sacnilk feed would replace the scraper. The ANCINE URL answered
   HTTP 403 from outside Brazil during development — the loader takes a file path too.
 - TV titles get no YouTube-search fallback.
 - Secret Manager (env vars are passed via `--set-env-vars` on the Cloud Run Job).
