@@ -120,7 +120,8 @@ def parse_sacnilk_page(html: str, *, year_hint: int | None = None) -> SacnilkFig
     )
     m = re.search(r"Theatrical Release\s*:?\s*\|?\s*(\d{1,2}\s+[A-Za-z]{3}[a-z]*\.?\s+\d{4})", text)
     if m:
-        f.release_date = parse_day(m.group(1), year_hint=year_hint)
+        rd = parse_day(m.group(1), year_hint=year_hint)
+        f.release_date = rd if rd and rd.year >= 1980 else None  # '01 Jan 1970' = unset
     # Cast & Crew: names are /tag/<Name_With_Underscores> links inside that section.
     i = html.find("Cast &amp; Crew")
     i = i if i >= 0 else html.find("Cast & Crew")

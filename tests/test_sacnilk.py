@@ -133,6 +133,13 @@ def test_run_sacnilk_stops_when_blocked_or_disallowed():
     assert client2.requests == []
 
 
+def test_epoch_release_date_is_treated_as_unknown():
+    page = PAGE.replace("09 Oct 2026", "01 Jan 1970")
+    f = sk.parse_sacnilk_page(page, year_hint=2026)
+    assert f.release_date is None
+    assert sk.verify({"primary_release_date": date(2026, 10, 9)}, f, ["Nisthar Ahammed"]) is None
+
+
 @pytest.mark.parametrize("s,expected", [("9 Oct 2026", date(2026, 10, 9)), ("10 Oct", date(2026, 10, 10)), ("nope", None)])
 def test_parse_day(s, expected):
     assert sk.parse_day(s, year_hint=2026) == expected

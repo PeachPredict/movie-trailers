@@ -242,12 +242,18 @@ LEFT JOIN vel v USING (youtube_video_id)
 GROUP BY 1, 2, 3, 4
 """
 
+# The signal cohort is restricted to released movies that have a box-office outcome, so
+# the predicted tier and the observed tier are ranked within the same population
+# (without this, every candidate that clears the views floor ranks "high" against the
+# long tail of tiny releases that have stats but no outcome).
 _SIGNAL_COHORT = """
 WITH rel AS (
-  SELECT tmdb_id, primary_release_date AS rel
-  FROM `{ds}.movies`
-  WHERE primary_release_date BETWEEN DATE_SUB(@today, INTERVAL @cohort_days DAY)
-                                 AND DATE_SUB(@today, INTERVAL 1 DAY)
+  SELECT m.tmdb_id, m.primary_release_date AS rel
+  FROM `{ds}.movies` m
+  WHERE m.primary_release_date BETWEEN DATE_SUB(@today, INTERVAL @cohort_days DAY)
+                                   AND DATE_SUB(@today, INTERVAL 1 DAY)
+    AND EXISTS (SELECT 1 FROM `{ds}.box_office_observations` o
+                WHERE o.tmdb_id = m.tmdb_id AND o.value > 0)
 ),
 per_trailer AS (
   SELECT t.movie_tmdb_id, s.youtube_video_id,
@@ -265,7 +271,8 @@ SELECT movie_tmdb_id, SUM(views) AS total_views FROM per_trailer GROUP BY 1
 
 
 def cohort_signals(bq: BigQueryClient, *, today: date) -> list[float]:
-    """Pre-release total trailer views of every movie released in the trailing cohort window."""
+    """Pre-release total trailer views of every movie released in the trailing cohort window
+    that has an outcome observation (the population the call will be scored against)."""
     ds = f"{bq.project}.{bq.dataset}"
     rows = bq.query(_SIGNAL_COHORT.format(ds=ds), {"today": today, "cohort_days": OPENING_COHORT_DAYS})
     return [float(r["total_views"]) for r in rows if r["total_views"]]
