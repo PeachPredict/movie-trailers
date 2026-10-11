@@ -26,6 +26,15 @@ from movie_trailers.clients.bigquery import BigQueryClient
 SPENT_VS_PEAK = 0.25  # current velocity below 25% of peak = demand "spent"
 SURGING_VS_PEAK = 0.80  # still ≥80% of peak = "taking off"
 DUE_MAX_DAYS_TO_RELEASE = 45  # a launch only matters if release is this close
+DUE_MIN_DAYS_TO_RELEASE = 7  # … but trailers essentially never drop in the final week
+TRAILER_DUE_HORIZON_DAYS = 21  # a 'trailer_due' call must land within this many days …
+
+
+def trailer_due_horizon(days_to_release: int | None) -> int:
+    """… and before release: the horizon is capped at days_to_release."""
+    if days_to_release is None or days_to_release <= 0:
+        return TRAILER_DUE_HORIZON_DAYS
+    return min(TRAILER_DUE_HORIZON_DAYS, int(days_to_release))
 DUE_MIN_TRAILER_AGE = 10  # … and nothing new has dropped in this many days
 SURGING_MAX_TRAILER_AGE = 10  # surge must be from a recent trailer
 SLIDE_RATIO = 0.90  # recent like/view below 90% of older = a real slide
@@ -175,7 +184,7 @@ def detect_findings(bq: BigQueryClient, *, days: int = 30, top: int = 6) -> list
             vs_peak is not None
             and vs_peak < SPENT_VS_PEAK
             and d2r is not None
-            and 1 <= d2r <= DUE_MAX_DAYS_TO_RELEASE
+            and DUE_MIN_DAYS_TO_RELEASE <= d2r <= DUE_MAX_DAYS_TO_RELEASE
             and (age or 0) >= DUE_MIN_TRAILER_AGE
         ):
             proximity = 1 - d2r / (DUE_MAX_DAYS_TO_RELEASE + 1)

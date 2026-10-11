@@ -13,10 +13,14 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from movie_trailers.clients.bigquery import BigQueryClient
-from movie_trailers.content.findings import Finding
+from movie_trailers.content.findings import (
+    TRAILER_DUE_HORIZON_DAYS,
+    Finding,
+    trailer_due_horizon,
+)
 from movie_trailers.models import ContentPredictionRow
 
-HORIZON_DAYS = 21  # a trailer must land within this many days for a 'hit'
+HORIZON_DAYS = TRAILER_DUE_HORIZON_DAYS  # upper bound; capped at days-to-release per call
 
 _FIELDS = [
     "prediction_id", "kind", "movie_tmdb_id", "title", "predicted_at", "horizon_days",
@@ -48,6 +52,8 @@ def record_predictions(
 
     Idempotent: re-running on the same day merges to the same prediction_id, and
     a movie that already has an open prediction is skipped (no duplicate episode).
+    The horizon is `min(horizon_days, days_to_release)`: the call is "a trailer
+    before release", so a movie opening in 9 days gets a 9-day horizon, not 21.
     Returns the number of predictions newly written.
     """
     has_open = {p["movie_tmdb_id"] for p in open_predictions(bq)}
@@ -56,6 +62,7 @@ def record_predictions(
     for f in findings:
         if f.kind != "trailer_due" or f.movie_tmdb_id in has_open:
             continue
+        d2r = f.metrics.get("days_to_release")
         rows.append(
             ContentPredictionRow(
                 prediction_id=f"{f.movie_tmdb_id}-{today.isoformat()}",
@@ -63,7 +70,7 @@ def record_predictions(
                 movie_tmdb_id=f.movie_tmdb_id,
                 title=f.title,
                 predicted_at=today,
-                horizon_days=horizon_days,
+                horizon_days=min(horizon_days, trailer_due_horizon(d2r)),
                 days_to_release_at_prediction=f.metrics.get("days_to_release"),
                 vs_peak_at_prediction=f.metrics.get("vs_peak"),
                 basis=f.headline,
@@ -167,19 +174,7 @@ def resolve_predictions(
     return {"hits": hits, "misses": misses}
 
 
-def track_record(bq: BigQueryClient) -> dict[str, Any]:
-    """Aggregate hit/miss/open counts, hit rate, and average lag-to-hit."""
-    rows = bq.query(
-        f"""
-        SELECT
-          COUNTIF(status = 'hit')  AS hits,
-          COUNTIF(status = 'miss') AS misses,
-          COUNTIF(status = 'open') AS open,
-          AVG(IF(status = 'hit', resolved_lag_days, NULL)) AS avg_hit_lag_days
-        FROM {_table(bq, 'content_predictions')}
-        """
-    )
-    r = rows[0] if rows else {}
+def _scoreboard(r: dict[str, Any]) -> dict[str, Any]:
     hits, misses = r.get("hits", 0) or 0, r.get("misses", 0) or 0
     resolved = hits + misses
     return {
@@ -189,3 +184,36 @@ def track_record(bq: BigQueryClient) -> dict[str, Any]:
         "hit_rate": (hits / resolved) if resolved else None,
         "avg_hit_lag_days": r.get("avg_hit_lag_days"),
     }
+
+
+def track_record(bq: BigQueryClient) -> dict[str, Any]:
+    """Aggregate hit/miss/open counts, hit rate, and average lag-to-hit.
+
+    Top-level keys are the all-kinds totals (consumers predate multiple kinds);
+    `by_kind` breaks the same scoreboard out per prediction kind.
+    """
+    rows = bq.query(
+        f"""
+        SELECT
+          kind,
+          COUNTIF(status = 'hit')  AS hits,
+          COUNTIF(status = 'miss') AS misses,
+          COUNTIF(status = 'open') AS open,
+          AVG(IF(status = 'hit', resolved_lag_days, NULL)) AS avg_hit_lag_days
+        FROM {_table(bq, 'content_predictions')}
+        GROUP BY kind
+        ORDER BY kind
+        """
+    )
+    by_kind = {r["kind"]: _scoreboard(r) for r in rows}
+    total = _scoreboard(
+        {
+            "hits": sum(s["hits"] for s in by_kind.values()),
+            "misses": sum(s["misses"] for s in by_kind.values()),
+            "open": sum(s["open"] for s in by_kind.values()),
+            "avg_hit_lag_days": next(
+                (r["avg_hit_lag_days"] for r in rows if r["kind"] == "trailer_due"), None
+            ),
+        }
+    )
+    return {**total, "by_kind": by_kind}

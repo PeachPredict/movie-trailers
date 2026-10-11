@@ -11,7 +11,7 @@ honest about uncertainty. A human edits and posts — these are first drafts.
 
 from __future__ import annotations
 
-from movie_trailers.content.findings import Finding
+from movie_trailers.content.findings import Finding, trailer_due_horizon
 
 # Where each kind tends to land best; surfaced in the review email as a nudge.
 PLATFORMS: dict[str, list[str]] = {
@@ -37,12 +37,14 @@ def drafts_for(finding: Finding) -> dict[str, object]:
     age = m.get("last_trailer_age_days")
 
     if finding.kind == "trailer_due":
+        horizon = trailer_due_horizon(d2r)
         fan = (
             f"🎬 {t} hits theaters in {d2r} days — but its trailers have gone quiet. "
             f"Daily views are down to {vs_peak} of their peak and nothing new has "
             f"dropped in {age} days.\n\n"
             f"Across 119 past launches I tracked, 77% of new trailers landed in exactly "
-            f"this state. So here's a falsifiable call: a fresh {t} trailer within ~2 weeks. "
+            f"this state. So here's a falsifiable call: a fresh {t} trailer within {horizon} days — "
+            f"before it opens. "
             f"Screenshot this. 📊"
         )
         technical = (
