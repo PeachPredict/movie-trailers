@@ -40,9 +40,16 @@ This processes up to `TRANSCRIPTS_MAX_PER_RUN` trailers per invocation (default
 
 ```sh
 docker compose run --rm transcripts run-daily \
-  --skip-movies --skip-tv --skip-stats --skip-comments \
+  --skip-movies --skip-tv --skip-search --skip-stats --skip-comments \
+  --skip-excitement --skip-predictions --skip-box-office \
   --transcripts-limit=100
 ```
+
+Keep **every** other phase skipped on this box. Phases run in order and an
+exception in one aborts the run, so a phase that can't work here (excitement's
+tables are dev-only; search needs the real YouTube key) would stop transcripts
+from ever starting — that is exactly what happened between 2026-06-27 and
+2026-10-11. Check `daily_run_log` for a `transcripts` row after each run.
 
 ## Scheduling
 

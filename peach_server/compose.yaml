@@ -13,8 +13,11 @@ x-mt: &mt
 
 services:
   # Residential-IP transcripts pass (YouTube blocks GCP egress). Builds the
-  # shared mt:latest image. Predictions are skipped here — they run on the Cloud
-  # Run daily job right after the stats phase (fresh data); the writes are
+  # shared mt:latest image. Every other phase is skipped here: search needs the
+  # real YouTube key + quota (Cloud Run owns it), excitement's tables are dev-only
+  # (and before 2026-10 its failure aborted the run *before* transcripts ran —
+  # the phase was silently dead from 2026-06-27), predictions + box_office run on
+  # the Cloud Run daily job right after stats (fresh data). All writes are
   # idempotent regardless.
   transcripts:
     <<: *mt
@@ -27,9 +30,12 @@ services:
       - run-daily
       - --skip-movies
       - --skip-tv
+      - --skip-search
       - --skip-stats
       - --skip-comments
+      - --skip-excitement
       - --skip-predictions
+      - --skip-box-office
 
   # Weekly digest email: country stats + prediction scoreboard + draft posts.
   # Needs SMTP_* + DIGEST_EMAIL_TO in .env. --polish (Claude rewrite) additionally

@@ -70,6 +70,13 @@ def run_excitement(
     today = today or datetime.now(UTC).date()
     ds = f"{settings.gcp_project}.{settings.bq_dataset}"
 
+    # The excitement table is part of the optional DDL (dev-only until the operator
+    # applies it to prod). Skip cleanly rather than abort the run — later phases
+    # (transcripts on peach_server) must not depend on it.
+    if not bq.table_exists("trailer_comment_excitement"):
+        log.warning("excitement.table_missing", dataset=settings.bq_dataset)
+        return 0, 0
+
     version = em.model_version()  # cheap: loads only the tiny head
     targets = [
         r["youtube_video_id"]

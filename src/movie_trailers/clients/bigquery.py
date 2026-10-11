@@ -56,6 +56,20 @@ class BigQueryClient:
     def _table(self, name: str) -> str:
         return f"`{self.project}.{self.dataset}.{name}`"
 
+    def table_exists(self, name: str) -> bool:
+        """True if `name` (table or view) exists in this dataset.
+
+        Lets optional phases (excitement) and read-only queries degrade gracefully on
+        datasets where the operator hasn't applied that part of the DDL yet.
+        """
+        from google.api_core.exceptions import NotFound
+
+        try:
+            self._client.get_table(f"{self.project}.{self.dataset}.{name}")
+        except NotFound:
+            return False
+        return True
+
     def merge_rows(
         self,
         *,
