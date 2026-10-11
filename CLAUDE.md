@@ -46,8 +46,8 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
   channel — and a 15–360s duration via one 1-unit `videos.list`). **Short titles** (≤2
   tokens, or 3 with a stopword) collide with games/TV/other films, so they must be
   confirmed by a top-8 cast / director / production-company name in the video's
-  title+description+tags+channel; non-Latin-script titles may instead carry an "official"
-  marker. Every drop is logged with its reason in `trailer_search_log.rejected` — tune the
+  title+description+tags+channel, or come from a studio/streamer channel on
+  `SEARCH_TRUSTED_CHANNELS`; non-Latin-script titles may instead carry an "official" marker. Every drop is logged with its reason in `trailer_search_log.rejected` — tune the
   filters from there, not by re-spending quota. `mt recheck-search-trailers [--dry-run]`
   re-applies the filters to past search-found rows and flips failures to `unavailable`.
 - **Stats** runs every day for every `tracking_status='active'` trailer. Batched 50 per

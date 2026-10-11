@@ -227,6 +227,14 @@ def credit_confirms(credits: list[str], *texts: str | None) -> bool:
     return any(_has_word(hay, n) for n in (normalize(c) for c in credits) if n)
 
 
+def channel_trusted(channel_title: str | None, trusted_channels: list[str] | None) -> bool:
+    """The upload comes from a studio / streamer channel on the allowlist."""
+    if not channel_title or not trusted_channels:
+        return False
+    ch = normalize(channel_title)
+    return any(_has_word(ch, normalize(t)) for t in trusted_channels if t)
+
+
 def evaluate_candidate(
     movie: dict[str, Any],
     *,
@@ -236,14 +244,16 @@ def evaluate_candidate(
     channel_title: str | None = None,
     duration_s: int | None,
     credits: list[str] | None = None,
+    trusted_channels: list[str] | None = None,
 ) -> str | None:
     """Why this search result is NOT the movie's trailer, or None if it passes.
 
     `credits` is the movie's confirmation list (top cast + directors); production
     companies from the movie row are added to it. It only matters for short titles
     (`is_short_title`): a Latin-script one must be confirmed by a name in the video's
-    title/description/tags/channel; a non-Latin one may instead carry an "official"
-    marker. With no names known at all, the release year or "official" stands in.
+    title/description/tags/channel — or come from a `trusted_channels` upload
+    (studios / streamers); a non-Latin one may instead carry an "official" marker.
+    With no names known at all, the release year or "official" stands in.
     """
     reason = _title_reason(movie, title)
     if reason:
@@ -267,11 +277,12 @@ def evaluate_candidate(
         release = movie.get("primary_release_date")
         year_s = str(release)[:4] if release else None
         official = any(_has_word(t, m) for m in _OFFICIAL_MARKERS)
+        trusted = channel_trusted(channel_title, trusted_channels)
         if names:
             confirmed = credit_confirms(names, title, description, " ".join(tags or []), channel_title)
-            if not confirmed and not (not _is_latin(name) and official):
+            if not (confirmed or trusted or (not _is_latin(name) and official)):
                 return "short_title_unconfirmed"
-        elif not ((year_s and _has_word(t, year_s)) or official):
+        elif not ((year_s and _has_word(t, year_s)) or official or trusted):
             return "short_title_no_credits"
     return None
 
@@ -294,6 +305,7 @@ def pick_trailers(
     max_matches: int,
     credits: list[str] | None = None,
     rejected: list[dict[str, str]] | None = None,
+    trusted_channels: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Filter search.list `items` (relevance order) down to plausible trailers.
 
@@ -336,13 +348,14 @@ def pick_trailers(
         reason = evaluate_candidate(
             movie, title=title, description=description, tags=tags,
             channel_title=channel_title, duration_s=duration, credits=credits,
+            trusted_channels=trusted_channels,
         )
         if reason:
             reject(vid, reason)
             continue
         confirmed = credit_confirms(
             confirmation_names(movie, credits), title, description, " ".join(tags), channel_title
-        )
+        ) or channel_trusted(channel_title, trusted_channels)
         passed.append((
             confirmed, pos,
             {
@@ -442,6 +455,7 @@ def run_search_trailers(
         picks = pick_trailers(
             movie, items, details, known=known, max_matches=settings.search_max_matches,
             credits=credits.get(int(movie["tmdb_id"])), rejected=rejected,
+            trusted_channels=settings.search_trusted_channels,
         )
         now = datetime.now(UTC)
         for p in picks:
@@ -581,7 +595,7 @@ def _upsert_search_log(bq: BigQueryClient, rows: list[TrailerSearchLogRow]) -> N
 # --- one-off recheck of search-found trailers -----------------------------------------
 
 def recheck_search_trailers(
-    bq: BigQueryClient, *, dry_run: bool = False
+    bq: BigQueryClient, *, settings: Settings | None = None, dry_run: bool = False
 ) -> list[dict[str, Any]]:
     """Re-apply `evaluate_candidate` to every search-found trailer (official IS NULL).
 
@@ -608,6 +622,7 @@ def recheck_search_trailers(
             r, title=r["name"] or "", description=r["description"],
             channel_title=r["channel_title"], duration_s=r["duration_seconds"],
             credits=credits.get(int(r["tmdb_id"])),
+            trusted_channels=settings.search_trusted_channels if settings else None,
         )
         if reason:
             bad.append({

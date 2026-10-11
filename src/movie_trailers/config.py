@@ -74,6 +74,24 @@ class Settings(BaseSettings):
     # language/country (TMDB's post-2025 scale: upcoming median ≈ 1, 3 ≈ top 5%).
     search_min_popularity: float = Field(3.0, alias="SEARCH_MIN_POPULARITY")
     search_max_units: int = Field(2500, alias="SEARCH_MAX_UNITS")
+    # Studio / streamer channels whose upload confirms a short title on its own (the
+    # credits-name rule otherwise rejects e.g. "Drive - The Pretenders | Prime Video India").
+    # Matched as whole-word phrases in the normalized channel title; extend via env (JSON list).
+    search_trusted_channels: list[str] = Field(
+        default_factory=lambda: [
+            "netflix", "prime video", "amazon prime", "amazon mgm", "apple tv", "disney",
+            "hotstar", "jiohotstar", "jio studios", "sony pictures", "sony liv", "zee studios",
+            "zee5", "zee music", "t series", "yrf", "yash raj films", "dharma productions",
+            "excel movies", "eros now", "lionsgate", "star studios", "sun pictures", "hombale films",
+            "mythri movie makers", "geetha arts", "sithara entertainments", "aashirvaad cinemas",
+            "red giant movies", "lyca productions", "saregama", "tips official", "pen movies",
+            "warner bros", "universal pictures", "paramount pictures", "20th century studios",
+            "a24", "focus features", "neon", "mubi", "studiocanal", "pathe", "gaumont",
+            "globoplay", "paris filmes", "downtown filmes", "o2 play", "imagem filmes",
+            "diamond films", "cinecolor", "vix", "telecine",
+        ],
+        alias="SEARCH_TRUSTED_CHANNELS",
+    )
     search_max_matches: int = Field(2, alias="SEARCH_MAX_MATCHES")
 
     # --- Digest email (optional; only required when running `mt send-digest`) ---

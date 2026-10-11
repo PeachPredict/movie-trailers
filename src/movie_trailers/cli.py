@@ -418,7 +418,7 @@ def recheck_search_trailers_cmd(
     bq = BigQueryClient(
         project=settings.gcp_project, dataset=settings.bq_dataset, location=settings.bq_location
     )
-    bad = recheck_search_trailers(bq, dry_run=dry_run)
+    bad = recheck_search_trailers(bq, settings=settings, dry_run=dry_run)
     for b in bad:
         typer.echo(f"{b['youtube_video_id']}\t{b['reason']}\t{b['movie']}\t{b['name']}")
     typer.echo(f"{'would flip' if dry_run else 'flipped'} {len(bad)} trailers to unavailable", err=True)

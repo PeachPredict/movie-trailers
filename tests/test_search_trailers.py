@@ -267,3 +267,21 @@ def test_pick_trailers_prefers_confirmed_and_logs_rejections():
     assert {r["video_id"]: r["reason"] for r in rejected} == {
         "unconf": "over_max_matches", "junk": "junk_word:reaction",
     }
+
+
+def test_trusted_channel_confirms_short_titles():
+    trusted = ["prime video", "netflix"]
+    drive = _movie("Drive - The Pretenders", lang="de")
+    assert _ok(drive, "Drive - The Pretenders Official Teaser | Prime Video India",
+               channel_title="Prime Video India", credits=["Nobody Here"]) == "short_title_unconfirmed"
+    assert _ok(drive, "Drive - The Pretenders Official Teaser | Prime Video India",
+               channel_title="Prime Video India", credits=["Nobody Here"], trusted_channels=trusted) is None
+    # No credits known either: a trusted channel stands in for the year/official rule too.
+    assert _ok(_movie("Dark Horse", lang="pt"), "Veja o trailer do filme Dark Horse",
+               channel_title="Netflix Brasil", trusted_channels=trusted) is None
+    # The season rule still catches the XO Kitty case even from Netflix.
+    assert _ok(_movie("XO", lang="mr"), "XO, Kitty: Season 3 | Official Trailer | Netflix",
+               channel_title="Netflix", trusted_channels=trusted) == "junk_word:season"
+    # An unknown channel gets no credit.
+    assert _ok(drive, "Drive - The Pretenders Official Teaser", channel_title="Random Uploads",
+               credits=["Nobody Here"], trusted_channels=trusted) == "short_title_unconfirmed"
