@@ -6,6 +6,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Annotated
 
 import structlog
 import typer
@@ -230,6 +231,38 @@ def backfill_trailers(
         f"scanned {movies} movies, added {added} trailers, "
         f"{youtube.quota_units_used} YouTube units"
     )
+
+
+@app.command("requeue-transcripts")
+def requeue_transcripts_cmd(
+    where: Annotated[
+        list[str],
+        typer.Option("--where", help="Row class to re-queue (repeatable): music | hallucinated | short | transient."),
+    ],
+    dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
+    dry_run: bool = typer.Option(False, help="List the video ids without clearing anything."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """One-off repair: clear the transcript guard for low-quality / transiently-failed rows.
+
+    The next transcripts run (peach_server) re-processes them with the quality gate.
+    """
+    from movie_trailers.pipeline.transcripts import REQUEUE_WHERE, requeue_transcripts
+
+    _configure_logging(verbose)
+    bad = [w for w in where if w not in REQUEUE_WHERE]
+    if bad:
+        raise typer.BadParameter(f"unknown --where {bad}; choose from {sorted(REQUEUE_WHERE)}")
+    settings = load_settings()
+    if dataset:
+        settings.bq_dataset = dataset
+    bq = BigQueryClient(
+        project=settings.gcp_project, dataset=settings.bq_dataset, location=settings.bq_location
+    )
+    ids = requeue_transcripts(bq, where=where, dry_run=dry_run)
+    for v in ids:
+        typer.echo(v)
+    typer.echo(f"{'would re-queue' if dry_run else 're-queued'} {len(ids)} trailers", err=True)
 
 
 class _PhaseCtx(dict):  # type: ignore[type-arg]

@@ -27,13 +27,16 @@ def fetch_country_stats(bq: BigQueryClient) -> list[dict[str, Any]]:
       SELECT
         t.youtube_video_id,
         t.tracking_status,
-        t.transcript_captured_at,
+        -- usable transcript: a text row whose quality gate passed (rows written
+        -- before the gate existed carry NULL quality and count as usable)
+        (x.text IS NOT NULL AND COALESCE(x.quality, 'ok') IN ('ok', 'suspect')) AS has_transcript,
         t.comments_at_discovery_captured_at,
         t.comments_pre_release_captured_at,
         country
       FROM {_table(bq, "trailers")} t
       LEFT JOIN {_table(bq, "movies")}   m  ON t.movie_tmdb_id = m.tmdb_id
       LEFT JOIN {_table(bq, "tv_shows")} tv ON t.tv_tmdb_id    = tv.tmdb_id
+      LEFT JOIN {_table(bq, "trailer_transcripts")} x ON x.youtube_video_id = t.youtube_video_id
       CROSS JOIN UNNEST(
         IF(
           ARRAY_LENGTH(COALESCE(m.origin_countries, tv.origin_countries, [])) = 0,
@@ -48,7 +51,7 @@ def fetch_country_stats(bq: BigQueryClient) -> list[dict[str, Any]]:
       COUNTIF(tracking_status = 'active')                                               AS active_trailers,
       COUNTIF(tracking_status = 'ended')                                                AS ended_trailers,
       COUNTIF(tracking_status = 'unavailable')                                          AS unavailable_trailers,
-      COUNTIF(transcript_captured_at IS NOT NULL)                                       AS with_transcript,
+      COUNTIF(has_transcript)                                                           AS with_transcript,
       COUNTIF(comments_at_discovery_captured_at IS NOT NULL
               OR comments_pre_release_captured_at IS NOT NULL)                          AS with_comments
     FROM trailer_country

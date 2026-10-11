@@ -154,6 +154,15 @@ class TrailerTranscriptRow(BaseModel):
     char_count: int | None = None
     error: str | None = None
     captured_at: datetime
+    # Provenance + confidence (2026-10): which model produced it and how sure it was.
+    model: str | None = None  # 'yta' | 'whisper-<size>'
+    language_probability: float | None = None
+    avg_logprob: float | None = None
+    no_speech_prob: float | None = None
+    compression_ratio: float | None = None
+    audio_duration_s: float | None = None
+    quality: str | None = None  # 'ok' | 'suspect' | 'hallucinated' | 'empty'
+    attempts: int = 1  # transient failures retry up to transcripts.MAX_ATTEMPTS
 
 
 class WatchProviderRow(BaseModel):

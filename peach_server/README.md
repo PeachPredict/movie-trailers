@@ -175,4 +175,7 @@ CRON_TZ=UTC
 - `TMDB_API_KEY` / `YOUTUBE_API_KEY` are required by `Settings` but unused in
   this path; dummy values are fine.
 - Transcripts already attempted (rows with `transcript_captured_at IS NOT NULL`)
-  are skipped. To force a re-fetch, clear that column manually in BigQuery.
+  are skipped. Transient failures (IP block, yt-dlp error) are *not* stamped and
+  retry on later runs (up to 3 attempts). To force a re-fetch of a class of rows:
+  `docker compose run --rm transcripts requeue-transcripts --where music --where hallucinated --dry-run`
+  (drop `--dry-run` to apply; the next nightly run picks them up).

@@ -145,16 +145,24 @@ OPTIONS (description = "Post-theatrical-run box-office snapshot. MERGE key: tmdb
 
 CREATE TABLE IF NOT EXISTS `${DATASET}.trailer_transcripts` (
   youtube_video_id STRING NOT NULL,
-  source STRING NOT NULL,                   -- 'yta' | 'whisper'
-  track_kind STRING,                        -- 'manual' | 'auto-generated' when source='yta'; NULL for whisper
-  language STRING,                          -- BCP-47 / ISO 639-1
+  source STRING NOT NULL,                   -- 'yta' | 'whisper' | 'failed'
+  track_kind STRING,                        -- yta: 'manual' | 'auto-generated'; whisper: 'speech' (VAD on) | 'music' (VAD-off rescue); NULL when failed
+  language STRING,                          -- ISO 639-1 (yta track language / Whisper detected)
   text STRING,
   word_count INT64,
   char_count INT64,
   error STRING,                             -- non-NULL when both methods failed; text will be NULL
-  captured_at TIMESTAMP NOT NULL
+  captured_at TIMESTAMP NOT NULL,
+  model STRING,                             -- 'yta' | 'whisper-<size>'
+  language_probability FLOAT64,             -- Whisper language-detection confidence
+  avg_logprob FLOAT64,                      -- mean over kept segments
+  no_speech_prob FLOAT64,                   -- mean over kept segments
+  compression_ratio FLOAT64,                -- mean over kept segments
+  audio_duration_s FLOAT64,
+  quality STRING,                           -- 'ok' | 'suspect' | 'hallucinated' | 'empty' (see transcripts._assess_quality); consumers filter quality='ok'
+  attempts INT64                            -- transient failures (IP block, yt-dlp error) retry up to 3 times before the guard is stamped
 )
-OPTIONS (description = "Per-trailer transcript, captured once at discovery. MERGE key: youtube_video_id. yta primary, faster-whisper small fallback.");
+OPTIONS (description = "Per-trailer transcript, one row per video (MERGE key: youtube_video_id). youtube-transcript-api in the title's languages first, faster-whisper fallback (medium on peach_server) with per-segment confidence filtering. `quality` is the gate.");
 
 CREATE TABLE IF NOT EXISTS `${DATASET}.watch_providers` (
   tmdb_id INT64 NOT NULL,
@@ -302,3 +310,19 @@ SELECT
 FROM e
 JOIN `${DATASET}.trailers` t USING (youtube_video_id)
 WHERE t.content_kind = 'movie' AND t.movie_tmdb_id IS NOT NULL;
+
+-- -----------------------------------------------------------------------------
+-- Migrations for datasets created before these columns existed. Each statement
+-- is idempotent (IF NOT EXISTS); run them in order against ${DATASET}.
+-- -----------------------------------------------------------------------------
+
+-- 2026-10-11: transcript confidence signals + quality gate + retry counter.
+ALTER TABLE `${DATASET}.trailer_transcripts`
+  ADD COLUMN IF NOT EXISTS model STRING,
+  ADD COLUMN IF NOT EXISTS language_probability FLOAT64,
+  ADD COLUMN IF NOT EXISTS avg_logprob FLOAT64,
+  ADD COLUMN IF NOT EXISTS no_speech_prob FLOAT64,
+  ADD COLUMN IF NOT EXISTS compression_ratio FLOAT64,
+  ADD COLUMN IF NOT EXISTS audio_duration_s FLOAT64,
+  ADD COLUMN IF NOT EXISTS quality STRING,
+  ADD COLUMN IF NOT EXISTS attempts INT64;
