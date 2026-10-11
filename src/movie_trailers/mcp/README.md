@@ -190,12 +190,27 @@ behind `comment_excitement_decay`. Returns the ordered `trailers` (`trailer_ordi
 ---
 
 ### `prediction_track_record()`
-The trailer-prediction scoreboard. Each `trailer_due` prediction (logged daily
-by the pipeline) is a **hit** when a new trailer drops within its horizon, a
-**miss** when the window passes. Returns `hits`, `misses`, `open`, `hit_rate`,
-and `avg_hit_lag_days`.
+The prediction scoreboard. Each `trailer_due` prediction (logged daily by the
+pipeline) is a **hit** when a new trailer drops within its horizon (capped at the
+release date), a **miss** when the window passes. Each `opening_tier` prediction
+(one per movie in its final pre-release week: high / mid / low tier from
+pre-release trailer views, relative to the last 180 days' releases) is a **hit**
+when the movie's box office lands in the same tier of the same cohort, scored on
+ANCINE admissions (BR), then OMDb US gross, then TMDB worldwide revenue. Returns
+`hits`, `misses`, `open`, `unscorable` (expired with no outcome data; excluded
+from the rate), `hit_rate`, `avg_hit_lag_days`, and the same per kind in `by_kind`.
 
 > *"How accurate have the automated trailer predictions been?"*
+
+---
+
+### `box_office(movie_tmdb_id)`
+A movie's observed outcomes per market (`markets`: BR admissions summed from
+ANCINE weekly rows, US domestic gross, worldwide revenue, each with the date it is
+good through), the raw `history` of observations, and the movie's `opening_tier`
+call with how it was scored.
+
+> *"How did movie 1234 actually do, and did the trailer signal call it?"*
 
 ## Typical chains
 

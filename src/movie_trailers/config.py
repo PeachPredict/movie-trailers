@@ -17,7 +17,16 @@ class Settings(BaseSettings):
 
     discover_window_months: int = Field(6, alias="DISCOVER_WINDOW_MONTHS")
     tracking_grace_days: int = Field(7, alias="TRACKING_GRACE_DAYS")
-    box_office_min_age_days: int = Field(180, alias="BOX_OFFICE_MIN_AGE_DAYS")
+    # --- box_office phase: TMDB revenue + OMDb (US domestic) for recently released titles ---
+    box_office_max_age_days: int = Field(180, alias="BOX_OFFICE_MAX_AGE_DAYS")
+    box_office_refresh_days: int = Field(7, alias="BOX_OFFICE_REFRESH_DAYS")
+    box_office_max_per_run: int = Field(400, alias="BOX_OFFICE_MAX_PER_RUN")
+    omdb_api_key: str | None = Field(None, alias="OMDB_API_KEY")  # free tier: 1,000 calls/day
+    omdb_max_per_run: int = Field(800, alias="OMDB_MAX_PER_RUN")
+    # ANCINE (Brazil) admissions: `mt load-ancine` default source (file path or URL).
+    ancine_source: str = Field(
+        "https://dados.ancine.gov.br/dados-abertos/BilheteriaObrasDia.csv", alias="ANCINE_SOURCE"
+    )
     max_active_trailers: int = Field(9300, alias="MAX_ACTIVE_TRAILERS")
     transcripts_max_per_run: int = Field(100, alias="TRANSCRIPTS_MAX_PER_RUN")
     whisper_model_name: str = Field("small", alias="WHISPER_MODEL_NAME")

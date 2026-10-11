@@ -75,3 +75,70 @@ def cutoff_for_period(period: str, today: date | None = None) -> date:
     if period == "month":
         return today - timedelta(days=30)
     raise ValueError(f"unknown digest period: {period!r} (expected 'week' or 'month')")
+
+
+def fetch_signal_vs_outcome(bq: BigQueryClient, *, days: int = 56, limit: int = 40) -> list[dict[str, Any]]:
+    """Movies released in the last `days` days that have any box-office observation,
+    next to their pre-release trailer signal and the opening_tier call (if one was made).
+
+    Read-only. Returns [] when the box-office table isn't provisioned yet.
+    """
+    if not bq.table_exists("vw_movie_box_office"):
+        return []
+    sql = f"""
+    WITH rel AS (
+      SELECT tmdb_id, title, primary_release_date AS rel, origin_countries
+      FROM {_table(bq, "movies")}
+      WHERE primary_release_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+                                     AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+    ),
+    per_trailer AS (
+      SELECT t.movie_tmdb_id, s.youtube_video_id,
+             ARRAY_AGG(s.view_count ORDER BY s.collected_date DESC LIMIT 1)[OFFSET(0)] AS views
+      FROM {_table(bq, "trailer_stats_daily")} s
+      JOIN {_table(bq, "trailers")} t USING (youtube_video_id)
+      JOIN rel r ON r.tmdb_id = t.movie_tmdb_id
+      WHERE t.content_kind = 'movie'
+        AND s.collected_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 500 DAY)
+        AND s.collected_date <= r.rel
+      GROUP BY 1, 2
+    ),
+    sig AS (SELECT movie_tmdb_id, SUM(views) AS total_views FROM per_trailer GROUP BY 1),
+    peak AS (
+      SELECT t.movie_tmdb_id, MAX(v.delta_views) AS peak_daily_views
+      FROM {_table(bq, "vw_trailer_daily_metrics")} v
+      JOIN {_table(bq, "trailers")} t USING (youtube_video_id)
+      JOIN rel r ON r.tmdb_id = t.movie_tmdb_id
+      WHERE v.collected_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 500 DAY)
+      GROUP BY 1
+    ),
+    bo AS (
+      SELECT tmdb_id,
+             MAX(IF(market = 'BR' AND metric = 'admissions', value, NULL)) AS br_admissions,
+             MAX(IF(market = 'US', value, NULL)) AS us_gross_usd,
+             MAX(IF(market = 'WW', value, NULL)) AS ww_revenue_usd,
+             MAX(through_date) AS through_date
+      FROM {_table(bq, "vw_movie_box_office")}
+      GROUP BY tmdb_id
+    ),
+    pred AS (
+      SELECT movie_tmdb_id, ANY_VALUE(predicted_value) AS predicted_tier,
+             ANY_VALUE(status) AS status, ANY_VALUE(observed_market) AS observed_market
+      FROM {_table(bq, "content_predictions")}
+      WHERE kind = 'opening_tier'
+      GROUP BY movie_tmdb_id
+    )
+    SELECT r.tmdb_id, r.title, r.rel AS release_date,
+           ARRAY_TO_STRING(r.origin_countries, ',') AS countries,
+           sig.total_views, peak.peak_daily_views,
+           bo.br_admissions, bo.us_gross_usd, bo.ww_revenue_usd, bo.through_date,
+           pred.predicted_tier, pred.status AS prediction_status, pred.observed_market
+    FROM rel r
+    JOIN bo ON bo.tmdb_id = r.tmdb_id
+    LEFT JOIN sig ON sig.movie_tmdb_id = r.tmdb_id
+    LEFT JOIN peak ON peak.movie_tmdb_id = r.tmdb_id
+    LEFT JOIN pred ON pred.movie_tmdb_id = r.tmdb_id
+    ORDER BY COALESCE(bo.br_admissions, bo.us_gross_usd, bo.ww_revenue_usd) DESC
+    LIMIT @limit
+    """
+    return bq.query(sql, {"days": days, "limit": limit})

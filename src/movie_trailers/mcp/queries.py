@@ -712,3 +712,40 @@ def movie_excitement_trend(
             else "steady excitement across trailers"
         )
     return out
+
+
+def box_office(bq: BigQueryClient, *, movie_tmdb_id: int) -> dict[str, Any]:
+    """Per-market outcome values + raw observation history + the opening_tier call."""
+    if not bq.table_exists("vw_movie_box_office"):
+        return {"movie_tmdb_id": movie_tmdb_id, "markets": [], "history": [], "prediction": None,
+                "note": "box_office_observations not provisioned in this dataset"}
+    markets = bq.query(
+        f"""
+        SELECT market, metric, source, value, through_date, budget_usd
+        FROM {_table(bq, 'vw_movie_box_office')} WHERE tmdb_id = @id ORDER BY market, metric
+        """,
+        {"id": movie_tmdb_id},
+    )
+    history = bq.query(
+        f"""
+        SELECT source, market, metric, value, cumulative, period_start, period_end, raw_title, match_method
+        FROM {_table(bq, 'box_office_observations')} WHERE tmdb_id = @id
+        ORDER BY market, metric, period_end
+        """,
+        {"id": movie_tmdb_id},
+    )
+    preds = bq.query(
+        f"""
+        SELECT prediction_id, predicted_at, days_to_release_at_prediction, predicted_value,
+               signal_value, status, resolved_at, observed_value, observed_metric, observed_market, basis
+        FROM {_table(bq, 'content_predictions')}
+        WHERE kind = 'opening_tier' AND movie_tmdb_id = @id ORDER BY predicted_at DESC LIMIT 1
+        """,
+        {"id": movie_tmdb_id},
+    )
+    return {
+        "movie_tmdb_id": movie_tmdb_id,
+        "markets": markets,
+        "history": history,
+        "prediction": preds[0] if preds else None,
+    }

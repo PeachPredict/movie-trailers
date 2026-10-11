@@ -17,7 +17,11 @@ from movie_trailers.clients.tmdb import TMDBClient
 from movie_trailers.clients.youtube import YouTubeClient
 from movie_trailers.config import load_settings
 from movie_trailers.digest.mailer import send_email
-from movie_trailers.digest.queries import fetch_country_stats
+from movie_trailers.digest.queries import (
+    cutoff_for_period,
+    fetch_country_stats,
+    fetch_signal_vs_outcome,
+)
 from movie_trailers.digest.render import render_digest_html
 from movie_trailers.models import DailyRunLogRow
 from movie_trailers.pipeline.comments import run_comments
@@ -74,6 +78,9 @@ def run_daily(
     skip_excitement: bool = typer.Option(False, help="Skip comment-excitement scoring."),
     skip_transcripts: bool = typer.Option(False, help="Skip transcripts."),
     skip_predictions: bool = typer.Option(False, help="Skip the prediction log update."),
+    skip_box_office: bool = typer.Option(
+        False, help="Skip the box-office outcomes phase (TMDB revenue + OMDb US gross)."
+    ),
     transcripts_limit: int | None = typer.Option(
         None, help="Override TRANSCRIPTS_MAX_PER_RUN for this run."
     ),
@@ -176,7 +183,9 @@ def run_daily(
             with _phase(run_id, "predictions", log_rows) as ctx:
                 from movie_trailers.content.findings import detect_findings
                 from movie_trailers.content.predictions import (
+                    record_opening_tier,
                     record_predictions,
+                    resolve_opening_tier,
                     resolve_predictions,
                 )
 
@@ -184,11 +193,40 @@ def run_daily(
                 findings = detect_findings(bq, days=30, top=50)
                 resolved = resolve_predictions(bq, today=today)
                 recorded = record_predictions(bq, findings, today=today)
-                ctx["trailers_processed"] = recorded
+                # opening_tier needs the box-office view; skip cleanly where it isn't provisioned.
+                if bq.table_exists("vw_movie_box_office"):
+                    opened = record_opening_tier(bq, today=today)
+                    scored = resolve_opening_tier(bq, today=today)
+                else:
+                    opened, scored = 0, {"hits": 0, "misses": 0, "unscorable": 0}
+                ctx["trailers_processed"] = recorded + opened
                 ctx["notes"] = (
-                    f"recorded={recorded} hits={resolved['hits']} "
-                    f"misses={resolved['misses']}"
+                    f"recorded={recorded} hits={resolved['hits']} misses={resolved['misses']} "
+                    f"opening_tier: recorded={opened} hits={scored['hits']} "
+                    f"misses={scored['misses']} unscorable={scored['unscorable']}"
                 )
+
+        # Box-office outcomes for recently released titles (TMDB revenue + OMDb US
+        # gross). Zero YouTube quota. ANCINE admissions load separately (mt load-ancine).
+        if not skip_box_office:
+            with _phase(run_id, "box_office", log_rows) as ctx:
+                from movie_trailers.clients.omdb import OMDbClient
+                from movie_trailers.pipeline.box_office import run_box_office
+
+                if not bq.table_exists("box_office_observations"):
+                    log.warning("box_office.table_missing", dataset=settings.bq_dataset)
+                    ctx["notes"] = "table missing"
+                else:
+                    omdb = OMDbClient(settings.omdb_api_key) if settings.omdb_api_key else None
+                    try:
+                        checked, written = run_box_office(
+                            tmdb=tmdb, omdb=omdb, bq=bq, settings=settings, limit=limit
+                        )
+                    finally:
+                        if omdb:
+                            omdb.close()
+                    ctx["trailers_processed"] = written
+                    ctx["notes"] = f"movies={checked} observations={written}"
     finally:
         _persist_run_log(bq, log_rows)
         tmdb.close()
@@ -263,6 +301,52 @@ def requeue_transcripts_cmd(
     for v in ids:
         typer.echo(v)
     typer.echo(f"{'would re-queue' if dry_run else 're-queued'} {len(ids)} trailers", err=True)
+
+
+@app.command("load-ancine")
+def load_ancine_cmd(
+    file: str | None = typer.Option(
+        None, "--file", help="ANCINE CSV: local path or URL. Default: ANCINE_SOURCE setting."
+    ),
+    cumulative: bool = typer.Option(
+        False, help="The file's Público is lifetime-to-date per row (not per week)."
+    ),
+    dataset: str | None = typer.Option(None, help="Override BQ_DATASET for this run."),
+    dry_run: bool = typer.Option(False, help="Parse + match, print the summary, write nothing."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Load Brazilian admissions (ANCINE open data) into box_office_observations.
+
+    Weekly or daily layouts are accepted; titles are matched to tracked movies by
+    original title (then a verified TMDB search on the Brazilian title). Unmatched
+    titles are listed, never guessed. Idempotent: re-loading the same weeks is a no-op.
+    """
+    from movie_trailers.pipeline.ancine import load_ancine
+
+    _configure_logging(verbose)
+    settings = load_settings()
+    if dataset:
+        settings.bq_dataset = dataset
+    bq = BigQueryClient(
+        project=settings.gcp_project, dataset=settings.bq_dataset, location=settings.bq_location
+    )
+    tmdb = TMDBClient(settings.tmdb_api_key) if settings.tmdb_api_key else None
+    try:
+        summary = load_ancine(
+            bq=bq, tmdb=tmdb, source=file or settings.ancine_source,
+            cumulative=cumulative, dry_run=dry_run,
+        )
+    finally:
+        if tmdb:
+            tmdb.close()
+    for t in summary["unmatched"]:
+        typer.echo(f"unmatched\t{t}")
+    typer.echo(
+        f"records={summary['records']} titles={summary['titles']} matched={summary['matched']} "
+        f"unmatched={len(summary['unmatched'])} observations={summary['observations']}"
+        f"{' (dry run)' if dry_run else ''}",
+        err=True,
+    )
 
 
 @app.command("recheck-search-trailers")
@@ -477,7 +561,7 @@ def send_digest(
     """
     from movie_trailers.content.findings import detect_findings
     from movie_trailers.content.polish import make_draft_fn
-    from movie_trailers.content.predictions import track_record
+    from movie_trailers.content.predictions import resolved_since, track_record
     from movie_trailers.content.render import render_content_section
 
     _configure_logging(verbose)
@@ -486,6 +570,7 @@ def send_digest(
         settings.bq_dataset = dataset
 
     today = date.today()
+    cutoff = cutoff_for_period(period, today)
 
     bq = BigQueryClient(
         project=settings.gcp_project,
@@ -497,10 +582,16 @@ def send_digest(
     countries = fetch_country_stats(bq)
     findings = detect_findings(bq, days=30, top=6)
     track = track_record(bq)
-    log.info("digest.fetched", countries=len(countries), findings=len(findings))
+    resolved = resolved_since(bq, cutoff=cutoff)
+    outcomes = fetch_signal_vs_outcome(bq, days=max(56, (today - cutoff).days * 2))
+    log.info(
+        "digest.fetched", countries=len(countries), findings=len(findings),
+        resolved=len(resolved), outcomes=len(outcomes),
+    )
 
     content_html = render_content_section(
-        findings, draft_fn=make_draft_fn(settings, polish=polish), track=track
+        findings, draft_fn=make_draft_fn(settings, polish=polish), track=track,
+        resolved=resolved, outcomes=outcomes, cutoff=cutoff,
     )
     html = render_digest_html(
         period=period, today=today, country_stats=countries, content_html=content_html

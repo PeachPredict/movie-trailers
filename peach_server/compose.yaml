@@ -63,6 +63,18 @@ services:
       - "127.0.0.1:${MCP_PORT:-8000}:8000"
     restart: unless-stopped
 
+  # Weekly: load Brazilian admissions (ANCINE open data) into box_office_observations.
+  # Runs here because the ANCINE host answered HTTP 403 from outside Brazil during
+  # development; ANCINE_SOURCE in .env can point at a URL or a downloaded file
+  # (mount it under /data). Idempotent — re-loading the same weeks is a no-op.
+  ancine:
+    <<: *mt
+    command:
+      - load-ancine
+    volumes:
+      - ./gcloud:/root/.config/gcloud:ro
+      - ./data:/data:ro
+
   # One-off: regenerate the portfolio site's read-only JSON snapshots straight
   # into the host repo's docs/data, for the cron that commits + pushes them
   # (refresh-site-data.sh). Read-only BigQuery — no writes. The service-level

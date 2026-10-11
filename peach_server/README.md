@@ -109,6 +109,24 @@ To expose it beyond this machine later, front it with Tailscale / a tunnel +
 auth — do **not** change the bind to `0.0.0.0` on the host side, since every tool
 call runs a billable BigQuery query.
 
+## ANCINE admissions (`ancine` service + weekly cron)
+
+Brazilian cinema admissions (público) per title come from ANCINE's open data,
+loaded into `box_office_observations` by `mt load-ancine`. The default source is
+the daily CSV (`ANCINE_SOURCE` in `.env`); point it at a downloaded file under
+`./data` if the host blocks the request (it returned HTTP 403 from a non-Brazilian
+IP during development). Dry-run first and check the `unmatched` list:
+
+```sh
+docker compose run --rm ancine load-ancine --dry-run
+docker compose run --rm ancine                     # writes
+```
+
+```cron
+CRON_TZ=UTC
+0 19 * * 4 cd /home/rnmourao/movie-trailers/peach_server && /snap/bin/docker compose run --rm ancine >> $HOME/mt-ancine.log 2>&1
+```
+
 ## Site-data refresh (`site-data` service + cron)
 
 Regenerates the portfolio site's read-only JSON snapshots (`docs/data/*.json`)

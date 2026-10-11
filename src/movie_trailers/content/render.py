@@ -17,6 +17,7 @@ from movie_trailers.content.findings import Finding
 
 _KIND_LABEL = {
     "trailer_due": "🎯 Prediction — trailer due",
+    "opening_tier": "🎟️ Prediction — opening tier",
     "surging": "🚀 Surging",
     "quality_slide": "📉 Cooling off",
     "excitement_fatigue": "🥱 Excitement fatigue",
@@ -51,19 +52,123 @@ def _draft_box(label: str, text: str) -> str:
     )
 
 
-def _track_record_block(track: dict[str, Any]) -> str:
-    hit = track.get("hits", 0)
-    miss = track.get("misses", 0)
-    open_ = track.get("open", 0)
-    rate = track.get("hit_rate")
+_KIND_SHORT = {"trailer_due": "trailer due", "opening_tier": "opening tier"}
+_TD = 'style="padding:4px 8px;border-bottom:1px solid #eee;font:13px sans-serif;vertical-align:top"'
+_TH = 'style="padding:4px 8px;border-bottom:2px solid #ccc;font:600 12px sans-serif;text-align:left;color:#555"'
+
+
+def _score_line(s: dict[str, Any]) -> str:
+    rate = s.get("hit_rate")
     rate_s = f"{rate:.0%}" if rate is not None else "—"
-    lag = track.get("avg_hit_lag_days")
+    lag = s.get("avg_hit_lag_days")
     lag_s = f", avg {lag:.1f}d to land" if lag is not None else ""
+    unsc = s.get("unscorable") or 0
+    unsc_s = f" · {unsc} unscorable" if unsc else ""
     return (
-        f'<p style="font:14px sans-serif;color:#444;background:#f0f4f8;'
-        f'border-radius:6px;padding:10px 12px">'
-        f"📈 <b>Prediction track record:</b> {hit} hit / {miss} miss "
-        f"(hit rate {rate_s}{lag_s}) · {open_} open</p>"
+        f"{s.get('hits', 0)} hit / {s.get('misses', 0)} miss (hit rate {rate_s}{lag_s}) "
+        f"· {s.get('open', 0)} open{unsc_s}"
+    )
+
+
+def _track_record_block(track: dict[str, Any]) -> str:
+    by_kind = track.get("by_kind") or {}
+    lines = [f"📈 <b>Prediction track record:</b> {_score_line(track)}"]
+    if len(by_kind) > 1 or (by_kind and "opening_tier" in by_kind):
+        for kind, s in by_kind.items():
+            lines.append(f"&nbsp;&nbsp;· <b>{escape(_KIND_SHORT.get(kind, kind))}:</b> {_score_line(s)}")
+    return (
+        '<p style="font:14px sans-serif;color:#444;background:#f0f4f8;'
+        'border-radius:6px;padding:10px 12px">' + "<br>".join(lines) + "</p>"
+    )
+
+
+def _num(v: Any, money: bool = False) -> str:
+    if v is None:
+        return "—"
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return escape(str(v))
+    if money:
+        return f"${n / 1e6:.1f}M" if n >= 1e6 else f"${n:,.0f}"
+    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n:,.0f}"
+
+
+def _outcome_text(r: dict[str, Any]) -> str:
+    """What happened, for one resolved prediction row (see predictions.resolved_since)."""
+    if r.get("kind") == "trailer_due":
+        if r.get("status") == "hit":
+            name = r.get("resolved_trailer_name") or r.get("resolved_youtube_video_id") or "a trailer"
+            return f"“{escape(str(name))}” landed after {r.get('resolved_lag_days')}d"
+        return f"no trailer within {r.get('horizon_days')}d"
+    metric = r.get("observed_metric")
+    if metric == "none":
+        return "no box-office data arrived (unscorable)"
+    label = {"admissions": "BR admissions", "domestic_gross_usd": "US gross",
+             "revenue_usd": "WW revenue"}.get(str(metric), str(metric))
+    money = metric != "admissions"
+    return f"{label} {_num(r.get('observed_value'), money)} vs the cohort"
+
+
+def _resolved_block(rows: list[dict[str, Any]], *, cutoff: date | None) -> str:
+    """'Resolved this period': one line per hit/miss with the evidence."""
+    head = (
+        '<h3 style="font:600 15px sans-serif;margin:16px 0 6px;color:#222">Resolved '
+        f"{'since ' + cutoff.isoformat() if cutoff else 'this period'}</h3>"
+    )
+    if not rows:
+        return head + '<p style="font:13px sans-serif;color:#666">No predictions resolved in this window.</p>'
+    trs = []
+    for r in rows:
+        kind = r.get("kind")
+        if kind == "trailer_due":
+            called = f"trailer within {r.get('horizon_days')}d (opens in {r.get('days_to_release_at_prediction')}d)"
+        else:
+            called = f"{escape(str(r.get('predicted_value') or '?'))} tier from {_num(r.get('signal_value'))} pre-release views"
+        unscorable = r.get("observed_metric") == "none"
+        mark = "⚪ n/a" if unscorable else ("✅ hit" if r.get("status") == "hit" else "❌ miss")
+        trs.append(
+            f"<tr><td {_TD}>{escape(str(r.get('resolved_at') or ''))}</td>"
+            f"<td {_TD}><b>{escape(str(r.get('title') or r.get('movie_tmdb_id')))}</b><br>"
+            f'<span style="color:#888">{escape(_KIND_SHORT.get(str(kind), str(kind)))} · called {escape(str(r.get("predicted_at") or ""))}</span></td>'
+            f"<td {_TD}>{called}</td><td {_TD}>{_outcome_text(r)}</td><td {_TD}>{mark}</td></tr>"
+        )
+    return (
+        head + '<table style="border-collapse:collapse;width:100%">'
+        f"<tr><th {_TH}>Resolved</th><th {_TH}>Movie</th><th {_TH}>Called</th><th {_TH}>What happened</th><th {_TH}>Result</th></tr>"
+        + "".join(trs) + "</table>"
+    )
+
+
+def _outcomes_block(rows: list[dict[str, Any]]) -> str:
+    """'Trailer signal vs box office': recent releases with any observed outcome."""
+    head = (
+        '<h3 style="font:600 15px sans-serif;margin:16px 0 6px;color:#222">Trailer signal vs box office</h3>'
+        '<p style="font:13px sans-serif;color:#666;margin:0 0 6px">Releases of the last weeks with an '
+        "observed outcome (ANCINE admissions / OMDb US gross / TMDB worldwide revenue) next to the "
+        "pre-release trailer views the opening-tier call was based on.</p>"
+    )
+    if not rows:
+        return head + '<p style="font:13px sans-serif;color:#666">No box-office observations yet.</p>'
+    trs = []
+    for r in rows:
+        tier = r.get("predicted_tier")
+        st = r.get("prediction_status")
+        call = "—" if not tier else f"{escape(str(tier))}" + (
+            f" ({'✅' if st == 'hit' else '❌' if st == 'miss' else 'open'})" if st else ""
+        )
+        trs.append(
+            f"<tr><td {_TD}><b>{escape(str(r.get('title') or ''))}</b><br>"
+            f'<span style="color:#888">{escape(str(r.get("countries") or ""))} · {escape(str(r.get("release_date") or ""))}</span></td>'
+            f"<td {_TD}>{_num(r.get('total_views'))}</td><td {_TD}>{_num(r.get('peak_daily_views'))}</td>"
+            f"<td {_TD}>{_num(r.get('br_admissions'))}</td><td {_TD}>{_num(r.get('us_gross_usd'), True)}</td>"
+            f"<td {_TD}>{_num(r.get('ww_revenue_usd'), True)}</td><td {_TD}>{call}</td></tr>"
+        )
+    return (
+        head + '<table style="border-collapse:collapse;width:100%">'
+        f"<tr><th {_TH}>Movie</th><th {_TH}>Pre-release views</th><th {_TH}>Peak daily</th>"
+        f"<th {_TH}>BR admissions</th><th {_TH}>US gross</th><th {_TH}>WW revenue</th><th {_TH}>Call</th></tr>"
+        + "".join(trs) + "</table>"
     )
 
 
@@ -89,8 +194,16 @@ def render_content_section(
     *,
     draft_fn: Callable[[Finding], dict[str, Any]] = drafts_for,
     track: dict[str, Any] | None = None,
+    resolved: list[dict[str, Any]] | None = None,
+    outcomes: list[dict[str, Any]] | None = None,
+    cutoff: date | None = None,
 ) -> str:
-    """The 'Predictions & draft posts' block — embeddable in the weekly digest."""
+    """The 'Predictions & draft posts' block — embeddable in the weekly digest.
+
+    `resolved` (predictions.resolved_since) lists every call scored in the period
+    with its evidence; `outcomes` (digest.queries.fetch_signal_vs_outcome) puts
+    recent releases' trailer signal next to their box office.
+    """
     parts = [
         '<h2 style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:18px;'
         'margin:28px 0 8px 0;color:#222;">Predictions &amp; draft posts</h2>',
@@ -99,6 +212,10 @@ def render_content_section(
     ]
     if track:
         parts.append(_track_record_block(track))
+    if resolved is not None:
+        parts.append(_resolved_block(resolved, cutoff=cutoff))
+    if outcomes is not None:
+        parts.append(_outcomes_block(outcomes))
     if findings:
         parts.append("".join(_finding_block(f, draft_fn) for f in findings))
     else:

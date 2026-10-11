@@ -192,14 +192,21 @@ class CreditRow(BaseModel):
     collected_at: datetime
 
 
-class BoxOfficeRow(BaseModel):
+class BoxOfficeObservationRow(BaseModel):
+    """One box-office / admissions observation (see box_office_observations DDL)."""
+
     tmdb_id: int
-    budget: int | None = None
-    revenue: int | None = None
-    runtime_minutes: int | None = None
-    release_date_used: date | None = None
-    tmdb_popularity_at_capture: float | None = None
-    captured_at: datetime
+    source: Literal["tmdb", "omdb", "ancine"]
+    market: Literal["WW", "US", "BR"]
+    metric: Literal["revenue_usd", "domestic_gross_usd", "admissions", "revenue_brl"]
+    value: float | None = None
+    cumulative: bool
+    period_start: date | None = None
+    period_end: date
+    budget_usd: int | None = None
+    raw_title: str | None = None
+    match_method: str | None = None
+    observed_at: datetime
 
 
 class TrailerSearchLogRow(BaseModel):
@@ -229,8 +236,8 @@ class DailyRunLogRow(BaseModel):
 
 
 class ContentPredictionRow(BaseModel):
-    prediction_id: str  # '{movie_tmdb_id}-{predicted_at}'
-    kind: str  # 'trailer_due'
+    prediction_id: str  # '{movie_tmdb_id}-{predicted_at}' ('{id}-{date}-opening' for opening_tier)
+    kind: str  # 'trailer_due' | 'opening_tier'
     movie_tmdb_id: int
     title: str | None = None
     predicted_at: date
@@ -244,6 +251,12 @@ class ContentPredictionRow(BaseModel):
     resolved_lag_days: int | None = None
     created_at: datetime
     updated_at: datetime
+    # opening_tier (2026-10): what was called and what the box office said.
+    predicted_value: str | None = None  # 'high' | 'mid' | 'low'
+    signal_value: float | None = None  # pre-release trailer views behind the call
+    observed_value: float | None = None
+    observed_metric: str | None = None  # 'admissions' | 'domestic_gross_usd' | 'revenue_usd' | 'none'
+    observed_market: str | None = None  # 'BR' | 'US' | 'WW'
 
 
 class TrailerCommentExcitementRow(BaseModel):

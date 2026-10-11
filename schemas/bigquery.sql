@@ -132,16 +132,26 @@ OPTIONS (
   require_partition_filter = TRUE
 );
 
-CREATE TABLE IF NOT EXISTS `${DATASET}.box_office` (
+-- Box-office / admissions outcomes, one row per observation. Three sources:
+--   tmdb   / WW / revenue_usd          lifetime worldwide gross (crowd-sourced, fills late), cumulative
+--   omdb   / US / domestic_gross_usd   US domestic gross (Box Office Mojo via OMDb), cumulative
+--   ancine / BR / admissions, revenue_brl   weekly público/renda per title (ANCINE open data), NOT cumulative
+-- (replaces the never-populated `box_office` table, 2026-10.)
+CREATE TABLE IF NOT EXISTS `${DATASET}.box_office_observations` (
   tmdb_id INT64 NOT NULL,
-  budget INT64,
-  revenue INT64,                            -- worldwide, USD per TMDB
-  runtime_minutes INT64,
-  release_date_used DATE,
-  tmdb_popularity_at_capture FLOAT64,
-  captured_at TIMESTAMP NOT NULL
+  source STRING NOT NULL,                   -- 'tmdb' | 'omdb' | 'ancine'
+  market STRING NOT NULL,                   -- 'WW' | 'US' | 'BR'
+  metric STRING NOT NULL,                   -- 'revenue_usd' | 'domestic_gross_usd' | 'admissions' | 'revenue_brl'
+  value FLOAT64,
+  cumulative BOOL NOT NULL,                 -- TRUE: lifetime-to-date snapshot; FALSE: the period's own count
+  period_start DATE,
+  period_end DATE NOT NULL,                 -- snapshot date for cumulative rows; week end for ANCINE
+  budget_usd INT64,                         -- TMDB only
+  raw_title STRING,                         -- ANCINE: the file's title, for match auditing
+  match_method STRING,                      -- ANCINE: 'original_title' | 'tmdb_search'
+  observed_at TIMESTAMP NOT NULL
 )
-OPTIONS (description = "Post-theatrical-run box-office snapshot. MERGE key: tmdb_id. V1 covers worldwide totals only.");
+OPTIONS (description = "Box-office / admissions outcomes per movie, long format. MERGE key: (tmdb_id, source, market, metric, period_end). Written by the box_office phase (TMDB + OMDb) and `mt load-ancine`. Query vw_movie_box_office for one value per (movie, market).");
 
 CREATE TABLE IF NOT EXISTS `${DATASET}.trailer_transcripts` (
   youtube_video_id STRING NOT NULL,
@@ -315,6 +325,31 @@ JOIN `${DATASET}.trailers` t USING (youtube_video_id)
 WHERE t.content_kind = 'movie' AND t.movie_tmdb_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
+-- One value per (movie, market): the latest cumulative snapshot (TMDB / OMDb) or
+-- the running sum of ANCINE's weekly rows, with the date the value is good through.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE VIEW `${DATASET}.vw_movie_box_office` AS
+WITH cum AS (
+  SELECT tmdb_id, market, metric, source,
+         ARRAY_AGG(value ORDER BY period_end DESC LIMIT 1)[OFFSET(0)] AS value,
+         MAX(period_end) AS through_date,
+         ANY_VALUE(budget_usd) AS budget_usd
+  FROM `${DATASET}.box_office_observations`
+  WHERE cumulative
+  GROUP BY tmdb_id, market, metric, source
+),
+wk AS (
+  SELECT tmdb_id, market, metric, source,
+         SUM(value) AS value, MAX(period_end) AS through_date, CAST(NULL AS INT64) AS budget_usd
+  FROM `${DATASET}.box_office_observations`
+  WHERE NOT cumulative
+  GROUP BY tmdb_id, market, metric, source
+)
+SELECT * FROM cum
+UNION ALL
+SELECT * FROM wk;
+
+-- -----------------------------------------------------------------------------
 -- Migrations for datasets created before these columns existed. Each statement
 -- is idempotent (IF NOT EXISTS); run them in order against ${DATASET}.
 -- -----------------------------------------------------------------------------
@@ -335,3 +370,13 @@ ALTER TABLE `${DATASET}.trailer_search_log`
   ADD COLUMN IF NOT EXISTS region_code STRING,
   ADD COLUMN IF NOT EXISTS relevance_language STRING,
   ADD COLUMN IF NOT EXISTS rejected STRING;
+
+-- 2026-10-11: box-office outcome predictions (kind='opening_tier').
+ALTER TABLE `${DATASET}.content_predictions`
+  ADD COLUMN IF NOT EXISTS predicted_value STRING,   -- opening_tier: 'high' | 'mid' | 'low'
+  ADD COLUMN IF NOT EXISTS signal_value FLOAT64,     -- opening_tier: pre-release trailer views the call was based on
+  ADD COLUMN IF NOT EXISTS observed_value FLOAT64,   -- the box-office number the call was scored against
+  ADD COLUMN IF NOT EXISTS observed_metric STRING,   -- 'admissions' | 'domestic_gross_usd' | 'revenue_usd' | 'none' (expired unscored)
+  ADD COLUMN IF NOT EXISTS observed_market STRING;   -- 'BR' | 'US' | 'WW'
+-- Also: the empty `box_office` table is superseded by `box_office_observations` +
+-- `vw_movie_box_office` above (CREATE them; DROP TABLE `${DATASET}.box_office` is optional).

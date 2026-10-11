@@ -105,6 +105,30 @@ class TMDBClient:
             {"append_to_response": "external_ids,credits,watch/providers"},
         )
 
+    def movie_box_office(self, tmdb_id: int) -> dict[str, Any]:
+        """Bare details call: `budget` / `revenue` (lifetime worldwide USD) without the
+        credits/providers appends the discover path needs."""
+        return self._get(f"/movie/{tmdb_id}")
+
+    def search_movie(
+        self,
+        query: str,
+        *,
+        language: str | None = None,
+        region: str | None = None,
+        year: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """/search/movie — used to resolve a local-market title (e.g. ANCINE's
+        'Título no Brasil') to a TMDB id; callers must verify the hit."""
+        params: dict[str, Any] = {"query": query, "include_adult": "false"}
+        if language:
+            params["language"] = language
+        if region:
+            params["region"] = region
+        if year:
+            params["year"] = year
+        return self._get("/search/movie", params).get("results", [])
+
     # --- TV ---
 
     def discover_tv(

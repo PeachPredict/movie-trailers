@@ -251,6 +251,21 @@ def prediction_track_record() -> dict[str, Any]:
     return _serialize(track_record(_client()))
 
 
+@mcp.tool()
+def box_office(movie_tmdb_id: int) -> dict[str, Any]:
+    """A movie's observed box office / admissions, per market, with its opening-tier call.
+
+    Markets: BR admissions (ANCINE weekly público, summed), US domestic gross
+    (OMDb / Box Office Mojo) and worldwide revenue (TMDB). `history` lists every
+    raw observation; `prediction` is the opening_tier call made in the movie's
+    final pre-release week, if any, with how it was scored.
+
+    Args:
+        movie_tmdb_id: the movie's TMDB id (see search_trailers output).
+    """
+    return _serialize(queries.box_office(_client(), movie_tmdb_id=movie_tmdb_id))
+
+
 def main(
     transport: str = "stdio",
     host: str | None = None,
