@@ -43,7 +43,8 @@ Cloud Scheduler ──daily 14:00 UTC──▶ Cloud Run Job (mt run-daily)
   discovery, then on the day before `tracking_end_date`. `comments_*_captured_at` columns on
   `trailers` are the idempotency guard — once set, the pipeline never re-captures.
 - Tracking window: trailer `published_at` → movie `release_date` (or TV season `air_date`),
-  plus a `tracking_grace_days` buffer.
+  plus a `tracking_grace_days` buffer. Stats collects while inside the window and flips
+  `tracking_status='ended'` the day after it — so `active` means exactly "still collected".
 
 ## Key quota math (default YouTube quota = 10K/day)
 

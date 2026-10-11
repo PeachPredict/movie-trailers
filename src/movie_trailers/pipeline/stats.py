@@ -38,7 +38,7 @@ def run_stats(
     written, unavailable = collect_stats(
         youtube=youtube, bq=bq, video_ids=active_ids, today=today
     )
-    _mark_ended(bq, today)
+    _mark_ended(bq, today, grace_days=settings.tracking_grace_days)
     log.info(
         "stats.done",
         active=len(active_ids),
@@ -200,15 +200,21 @@ def _mark_unavailable(bq: BigQueryClient, ids: list[str], now: datetime) -> None
     )
 
 
-def _mark_ended(bq: BigQueryClient, today: date) -> None:
+def _mark_ended(bq: BigQueryClient, today: date, *, grace_days: int) -> None:
+    """Flip trailers past `tracking_end_date + grace` to 'ended'.
+
+    Uses the same grace as `_select_active_video_ids` so 'active' means exactly
+    "still being collected" (a hardcoded 30-day flip used to leave ~800 trailers
+    active-but-uncollected, inflating active counts downstream).
+    """
     sql = f"""
     UPDATE `{bq.project}.{bq.dataset}.trailers`
     SET tracking_status = 'ended'
     WHERE tracking_status = 'active'
       AND tracking_end_date IS NOT NULL
-      AND @today > DATE_ADD(tracking_end_date, INTERVAL 30 DAY)
+      AND @today > DATE_ADD(tracking_end_date, INTERVAL @grace DAY)
     """
-    bq.query(sql, {"today": today})
+    bq.query(sql, {"today": today, "grace": grace_days})
 
 
 def _chunks(seq: list[str], size: int):

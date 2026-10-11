@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS `${DATASET}.trailers` (
   tracking_status STRING NOT NULL,          -- 'active' | 'ended' | 'unavailable'
   comments_disabled BOOL NOT NULL,          -- pipeline always inserts explicit value
   comments_at_discovery_captured_at TIMESTAMP,
-  comments_pre_release_captured_at TIMESTAMP,
+  comments_pre_release_captured_at TIMESTAMP, -- target: day before tracking_end_date; accepted up to 2 days late
   transcript_captured_at TIMESTAMP          -- guard: stamped success or permanent failure; never re-runs
 )
 OPTIONS (description = "Polymorphic trailer registry. MERGE key: youtube_video_id. Exactly one of {movie_tmdb_id} or {tv_tmdb_id, tv_season_number} is set.");

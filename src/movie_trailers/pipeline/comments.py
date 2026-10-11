@@ -72,7 +72,11 @@ def _select_targets(
             " AND comments_disabled = FALSE"
             " AND comments_pre_release_captured_at IS NULL"
             " AND tracking_end_date IS NOT NULL"
-            " AND tracking_end_date BETWEEN @today AND DATE_ADD(@today, INTERVAL 1 DAY)"
+            # Day-before-release is the target, but a run that failed or a release
+            # date that moved must not lose the capture forever: accept up to two
+            # days late (still "around release").
+            " AND tracking_end_date BETWEEN DATE_SUB(@today, INTERVAL 2 DAY)"
+            " AND DATE_ADD(@today, INTERVAL 1 DAY)"
         )
     cap = limit if limit is not None else 100000
     sql = f"""
